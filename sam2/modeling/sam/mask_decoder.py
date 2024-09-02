@@ -110,9 +110,10 @@ class MaskDecoder(nn.Module):
     def forward(
         self,
         image_embeddings: torch.Tensor,
-        image_pe: torch.Tensor,
-        sparse_prompt_embeddings: torch.Tensor,
-        dense_prompt_embeddings: torch.Tensor,
+        text_embeddings: torch.Tensor,
+        # image_pe: torch.Tensor,
+        # sparse_prompt_embeddings: torch.Tensor,
+        # dense_prompt_embeddings: torch.Tensor,
         multimask_output: bool,
         repeat_image: bool,
         high_res_features: Optional[List[torch.Tensor]] = None,
@@ -135,9 +136,10 @@ class MaskDecoder(nn.Module):
         """
         masks, iou_pred, mask_tokens_out, object_score_logits = self.predict_masks(
             image_embeddings=image_embeddings,
-            image_pe=image_pe,
-            sparse_prompt_embeddings=sparse_prompt_embeddings,
-            dense_prompt_embeddings=dense_prompt_embeddings,
+            text_embeddings=text_embeddings,
+            # image_pe=image_pe,
+            # sparse_prompt_embeddings=sparse_prompt_embeddings,
+            # dense_prompt_embeddings=dense_prompt_embeddings,
             repeat_image=repeat_image,
             high_res_features=high_res_features,
         )
@@ -168,9 +170,10 @@ class MaskDecoder(nn.Module):
     def predict_masks(
         self,
         image_embeddings: torch.Tensor,
-        image_pe: torch.Tensor,
-        sparse_prompt_embeddings: torch.Tensor,
-        dense_prompt_embeddings: torch.Tensor,
+        # image_pe: torch.Tensor,
+        # sparse_prompt_embeddings: torch.Tensor,
+        # dense_prompt_embeddings: torch.Tensor,
+        text_embeddings: torch.Tensor, # text_embeddings: [bs, n_prompt, dim]
         repeat_image: bool,
         high_res_features: Optional[List[torch.Tensor]] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -192,25 +195,25 @@ class MaskDecoder(nn.Module):
                 [self.iou_token.weight, self.mask_tokens.weight], dim=0
             )
         output_tokens = output_tokens.unsqueeze(0).expand(
-            sparse_prompt_embeddings.size(0), -1, -1
-        )
-        tokens = torch.cat((output_tokens, sparse_prompt_embeddings), dim=1)
+            text_embeddings.size(0), -1, -1
+        )     # text_embeddings: [bs, n_prompt, dim]; output_tokens: [bs, 2 (iou/mask_tokens), dim]
+        tokens = torch.cat((output_tokens, text_embeddings), dim=1)
 
         # Expand per-image data in batch direction to be per-mask
-        if repeat_image:
+        if repeat_image:  # False, images have already been batched
             src = torch.repeat_interleave(image_embeddings, tokens.shape[0], dim=0)
         else:
-            assert image_embeddings.shape[0] == tokens.shape[0]
+            assert image_embeddings.shape[0] == tokens.shape[0]  # check batch size
             src = image_embeddings
-        src = src + dense_prompt_embeddings
-        assert (
-            image_pe.size(0) == 1
-        ), "image_pe should have size 1 in batch dim (from `get_dense_pe()`)"
-        pos_src = torch.repeat_interleave(image_pe, tokens.shape[0], dim=0)
+        src = src # + dense_prompt_embeddings
+        # assert (
+        #     image_pe.size(0) == 1
+        # ), "image_pe should have size 1 in batch dim (from `get_dense_pe()`)"
+        # pos_src = torch.repeat_interleave(image_pe, tokens.shape[0], dim=0)
         b, c, h, w = src.shape
 
         # Run the transformer
-        hs, src = self.transformer(src, pos_src, tokens)
+        hs, src = self.transformer(src, tokens) # (src, pos_src, tokens)
         iou_token_out = hs[:, s, :]
         mask_tokens_out = hs[:, s + 1 : (s + 1 + self.num_mask_tokens), :]
 

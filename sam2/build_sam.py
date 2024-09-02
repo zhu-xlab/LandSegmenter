@@ -15,6 +15,7 @@ from omegaconf import OmegaConf
 def build_sam2(
     config_file,
     ckpt_path=None,
+    ckpt_path_clip=None,
     device="cuda",
     mode="eval",
     hydra_overrides_extra=[],
@@ -34,7 +35,7 @@ def build_sam2(
     cfg = compose(config_name=config_file, overrides=hydra_overrides_extra)
     OmegaConf.resolve(cfg)
     model = instantiate(cfg.model, _recursive_=True)
-    _load_checkpoint(model, ckpt_path)
+    _load_checkpoint(model, ckpt_path, ckpt_path_clip)
     model = model.to(device)
     if mode == "eval":
         model.eval()
@@ -116,14 +117,26 @@ def build_sam2_video_predictor_hf(model_id, **kwargs):
     )
 
 
-def _load_checkpoint(model, ckpt_path):
+def _load_checkpoint(model, ckpt_path, ckpt_path_clip):
     if ckpt_path is not None:
         sd = torch.load(ckpt_path, map_location="cpu")["model"]
-        missing_keys, unexpected_keys = model.load_state_dict(sd)
+        missing_keys, unexpected_keys = model.load_state_dict(sd, strict=False)
         if missing_keys:
-            logging.error(missing_keys)
-            raise RuntimeError()
+            print(missing_keys)
+            # logging.error(missing_keys)
+            # raise RuntimeError()
         if unexpected_keys:
-            logging.error(unexpected_keys)
-            raise RuntimeError()
-        logging.info("Loaded checkpoint sucessfully")
+            print(unexpected_keys)
+            # logging.error(unexpected_keys)
+            # raise RuntimeError()
+        
+    # load clip model
+    if ckpt_path_clip is not None:
+        print(f"------Loading clip model from {ckpt_path_clip}------")
+        sd = torch.load(ckpt_path_clip, map_location="cpu")
+        missing_keys, unexpected_keys = model.sam_prompt_encoder.load_state_dict(sd, strict=False)
+        if missing_keys:
+            print(missing_keys)
+        if unexpected_keys:
+            print(unexpected_keys)
+        # logging.info("Loaded checkpoint sucessfully")
