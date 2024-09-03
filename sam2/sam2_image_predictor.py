@@ -410,9 +410,9 @@ class SAM2ImagePredictor:
         #     masks=mask_input,
         # )
 
-        text_embeddings = self.model.sam_prompt_encoder(text_tokens)
-        print('text_tokens shape:', text_tokens.shape)
-        print('text_embedding shape:', text_embeddings.shape)
+        text_embeddings = self.model.sam_prompt_encoder(text_tokens) 
+        # text_tokens shape: torch.Size([1, 77])
+        # text_embedding shape: torch.Size([1, 256])
 
         ########################!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         # # Predict masks
@@ -420,13 +420,14 @@ class SAM2ImagePredictor:
         #     concat_points is not None and concat_points[0].shape[0] > 1
         # )  # multi object prediction
         batched_mode = False
+        n_textembed = text_embeddings.shape[0]
         high_res_features = [
-            feat_level[img_idx].unsqueeze(0)
+            feat_level[img_idx].unsqueeze(0).repeat(n_textembed, 1, 1, 1)
             for feat_level in self._features["high_res_feats"]
         ]
         low_res_masks, iou_predictions, _, _ = self.model.sam_mask_decoder(
-            image_embeddings=self._features["image_embed"][img_idx].unsqueeze(0),
-            text_embeddings=text_embeddings.unsqueeze(0),
+            image_embeddings=self._features["image_embed"][img_idx].unsqueeze(0).repeat(n_textembed, 1, 1, 1),
+            text_embeddings=text_embeddings.unsqueeze(1),
             # image_pe=self.model.sam_prompt_encoder.get_dense_pe(),
             # sparse_prompt_embeddings=sparse_embeddings,
             # dense_prompt_embeddings=dense_embeddings,
