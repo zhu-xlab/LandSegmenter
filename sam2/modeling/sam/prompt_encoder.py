@@ -186,7 +186,7 @@ class PromptEncoder(nn.Module):
 class PromptEncoderCLIP(nn.Module):
     def __init__(self,
                  clip_embed_dim: int,
-                 embed_dim: int,
+                #  embed_dim: int,
                  # text
                  context_length: int,
                  vocab_size: int,
@@ -216,7 +216,7 @@ class PromptEncoderCLIP(nn.Module):
         # self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
 
         # convert CLIP embeddings to desired dimension
-        self.clip_fn = nn.Linear(clip_embed_dim, embed_dim, bias=True)
+        # self.clip_fn = nn.Linear(clip_embed_dim, embed_dim, bias=True)
         # # for tokenization
         # self.tokenizer = SimpleTokenizer()
 
@@ -246,47 +246,6 @@ class PromptEncoderCLIP(nn.Module):
         mask.triu_(1)  # zero out the lower diagonal
         return mask
 
-    # def tokenize(self, texts):
-    #     """
-    #     Returns the tokenized representation of given input string(s)
-
-    #     Parameters
-    #     ----------
-    #     texts : Union[str, List[str]]
-    #         An input string or a list of input strings to tokenize
-
-    #     context_length : int
-    #         The context length to use; all CLIP models use 77 as the context length
-
-    #     truncate: bool = False
-    #         Whether to truncate the text in case its encoding is longer than the context length
-
-    #     Returns
-    #     -------
-    #     A two-dimensional tensor containing the resulting tokens, shape = [number of input strings, context_length].
-    #     We return LongTensor when torch version is <1.8.0, since older index_select requires indices to be long.
-    #     """
-    #     truncate = False
-
-    #     if isinstance(texts, str):
-    #         texts = [texts]
-
-    #     sot_token = self.tokenizer.encoder["<|startoftext|>"]
-    #     eot_token = self.tokenizer.encoder["<|endoftext|>"]
-    #     all_tokens = [[sot_token] + self.tokenizer.encode(text) + [eot_token] for text in texts]
-    #     result = torch.zeros(len(all_tokens), self.context_length, dtype=torch.long)
-
-    #     for i, tokens in enumerate(all_tokens):
-    #         if len(tokens) > self.context_length:
-    #             if truncate:
-    #                 tokens = tokens[:self.context_length]
-    #                 tokens[-1] = eot_token
-    #             else:
-    #                 raise RuntimeError(f"Input {texts[i]} is too long for context length {self.context_length}")
-    #         result[i, :len(tokens)] = torch.tensor(tokens)
-
-    #     return result
-
     def encode_text(self, text):
         x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
 
@@ -304,8 +263,8 @@ class PromptEncoderCLIP(nn.Module):
 
     def forward(self, text):
         x = self.encode_text(text)
-        x = self.clip_fn(x)
-        return x  # [batch_size, n_prompt, d_model]
+        # x = self.clip_fn(x)  # [batch_size, n_prompt, d_model]
+        return x  # [batch_size, n_prompt, clip_embed_dim]
 
 
 

@@ -8,3 +8,6 @@ build/*
 _C.*
 outputs/*
 checkpoints/*.pt
+*.sh
+srun_outs
+Results*

@@ -96,7 +96,7 @@ model:
   # use high-resolution feature map in the SAM mask decoder
   use_high_res_features_in_sam: true
   # output 3 masks on the first click on initial conditioning frames
-  multimask_output_in_sam: true
+  multimask_output_in_sam: false
   # SAM heads
   iou_prediction_use_sigmoid: True
   # cross-attend to object pointers from other frames (based on SAM output tokens) in the encoder

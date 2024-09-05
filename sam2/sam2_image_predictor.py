@@ -410,7 +410,8 @@ class SAM2ImagePredictor:
         #     masks=mask_input,
         # )
 
-        text_embeddings = self.model.sam_prompt_encoder(text_tokens) 
+        text_embeddings = self.model.sam_prompt_encoder(text_tokens) # dim=512 (clip dim)
+        text_embeddings = self.model.sam_prompt_fn(text_embeddings)  # dim=256
         # text_tokens shape: torch.Size([1, 77])
         # text_embedding shape: torch.Size([1, 256])
 

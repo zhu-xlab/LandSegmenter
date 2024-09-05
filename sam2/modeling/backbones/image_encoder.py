@@ -68,6 +68,7 @@ class FpnNeck(nn.Module):
         :param neck_norm: the normalization to use
         """
         super().__init__()
+        self.d_model = d_model
         self.position_encoding = position_encoding
         self.convs = nn.ModuleList()
         self.backbone_channel_list = backbone_channel_list

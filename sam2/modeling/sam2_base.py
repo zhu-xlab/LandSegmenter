@@ -214,15 +214,16 @@ class SAM2Base(torch.nn.Module):
         #     input_image_size=(self.image_size, self.image_size),
         #     mask_in_chans=16,
         # )
+        clip_embed_dim = 512 # 512 by default for CLIP (base) / 768 - large
         self.sam_prompt_encoder = PromptEncoderCLIP(
-            clip_embed_dim=512,   # 512 by default for CLIP (base) / 768 - large 
-            embed_dim=self.sam_prompt_embed_dim,
+            clip_embed_dim=clip_embed_dim,   # 512 by default for CLIP (base) / 768 - large 
             context_length=77,    # 77 by default for CLIP
             vocab_size=49408,     # 49408 by default for CLIP
             transformer_heads=8,  # 8 by default for CLIP
             transformer_layers=12,  # 12 by default for CLIP
             transformer_width=512,  # 512 by default for CLIP (base) / 768 - large
         )
+        self.sam_prompt_fn = torch.nn.Linear(clip_embed_dim, self.sam_prompt_embed_dim, bias=True)
         self.sam_mask_decoder = MaskDecoder(
             num_multimask_outputs=3,
             transformer=TwoWayTransformer(
@@ -260,8 +261,6 @@ class SAM2Base(torch.nn.Module):
     def _forward_sam_heads(
         self,
         backbone_features,
-        # point_inputs=None,
-        # mask_inputs=None,
         text_prompt=None,
         high_res_features=None,
         multimask_output=False,
@@ -311,44 +310,13 @@ class SAM2Base(torch.nn.Module):
         assert backbone_features.size(2) == self.sam_image_embedding_size
         assert backbone_features.size(3) == self.sam_image_embedding_size
 
-        # # a) Handle point prompts
-        # if point_inputs is not None:
-        #     sam_point_coords = point_inputs["point_coords"]
-        #     sam_point_labels = point_inputs["point_labels"]
-        #     assert sam_point_coords.size(0) == B and sam_point_labels.size(0) == B
-        # else:
-        #     # If no points are provide, pad with an empty point (with label -1)
-        #     sam_point_coords = torch.zeros(B, 1, 2, device=device)
-        #     sam_point_labels = -torch.ones(B, 1, dtype=torch.int32, device=device)
-
-        # # b) Handle mask prompts
-        # if mask_inputs is not None:
-        #     # If mask_inputs is provided, downsize it into low-res mask input if needed
-        #     # and feed it as a dense mask prompt into the SAM mask encoder
-        #     assert len(mask_inputs.shape) == 4 and mask_inputs.shape[:2] == (B, 1)
-        #     if mask_inputs.shape[-2:] != self.sam_prompt_encoder.mask_input_size:
-        #         sam_mask_prompt = F.interpolate(
-        #             mask_inputs.float(),
-        #             size=self.sam_prompt_encoder.mask_input_size,
-        #             align_corners=False,
-        #             mode="bilinear",
-        #             antialias=True,  # use antialias for downsampling
-        #         )
-        #     else:
-        #         sam_mask_prompt = mask_inputs
-        # else:
-        #     # Otherwise, simply feed None (and SAM's prompt encoder will add
-        #     # a learned `no_mask_embed` to indicate no mask input in this case).
-        #     sam_mask_prompt = None
-
-        # sparse_embeddings, dense_embeddings = self.sam_prompt_encoder(
-        #     points=(sam_point_coords, sam_point_labels),
-        #     boxes=None,
-        #     masks=sam_mask_prompt,
-        # )
+        # process text prompt
         text_embeddings = self.sam_prompt_encoder(
             text=text_prompt,
         )
+        text_embeddings = self.sam_prompt_fn(text_embeddings)   # [batch_size, n_prompt, clip_embed_dim] -> [batch_size, n_prompt, embed_dim]
+        
+        # decode the mask with image features and text embeddings
         (
             low_res_multimasks,
             ious,
@@ -357,9 +325,6 @@ class SAM2Base(torch.nn.Module):
         ) = self.sam_mask_decoder(
             image_embeddings=backbone_features,
             text_embeddings=text_embeddings,
-            # image_pe=self.sam_prompt_encoder.get_dense_pe(),
-            # sparse_prompt_embeddings=sparse_embeddings,
-            # dense_prompt_embeddings=dense_embeddings,
             multimask_output=multimask_output,
             repeat_image=False,  # the image is already batched
             high_res_features=high_res_features,
