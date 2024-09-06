@@ -62,9 +62,6 @@ class SAM2ImageTrainer(pl.LightningModule):
             the maximum area of max_sprinkle_area in low_res_masks.
         """
         super().__init__()
-        # manually enable step-based scheduler
-        self.automatic_optimization = False
-
         # copnstruct sam2-based model (image encoder and prompt encoder weights are automatically fixed)
         self.model = build_sam2(args.config_file, args.ckpt_path, args.ckpt_path_clip)
         # set up the losses: dice and focal
@@ -91,6 +88,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.schdt = args.schdt
         self.schdv = args.schdv
         self.max_epochs = args.epochs
+        self.n_train_batches = int(args.n_batch_tr/(args.nodes*args.devices))
         # display interval
         self.display_inv = args.display_inv
         
@@ -166,14 +164,16 @@ class SAM2ImageTrainer(pl.LightningModule):
                     lr_min = FINAL_LR
                 print(f'Initial LR (={self.lr}) is scheduled by {self.schdt} to reduce to {lr_min} in {T} epochs with a {T_warm}-epoch linear warmup stage.')
                 # lambda_func
-                lambda_func = lambda epoch: (
+                step_warmup = T_warm*self.trainer.num_training_batches
+                step_total = T*self.trainer.num_training_batches
+                lambda_func = lambda step: (
                     # Warmup phase: Linearly increase learning rate from warmup_lr to final_lr
-                    (lr_min + (self.current_step / T_warm*self.trainer.num_training_batches) / (self.lr - lr_min)) / self.lr
-                    if epoch < T_warm
+                    step / step_warmup
+                    if step < step_warmup
                     else (
                     # Cosine annealing phase after warmup
-                    (lr_min + (1 + np.cos(np.pi * (epoch - T_warm) / (T - T_warm))) * (self.lr - lr_min) / 2) / self.lr
-                    if epoch < T 
+                    (lr_min + (1 + np.cos(np.pi * (step - step_warmup) / (step_total - step_warmup))) * (self.lr - lr_min) / 2) / self.lr
+                    if step < step_total 
                     else 
                     lr_min / self.lr)
                 )
@@ -184,15 +184,12 @@ class SAM2ImageTrainer(pl.LightningModule):
                     print(f'More values than one ({self.schdv}) are provided for exponential scheduler, only the first one ({gamma}) is used!')
                 scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma)
                 print(f'Initial LR (={self.lr}) is scheduled by {self.schdt} with gamma={gamma}.')
-            return {"optimizer": optimizer, "lr_scheduler": scheduler}
+            return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step"},}
     
 
     # ------ Training ------ #
     def training_step(self, batch, batch_idx):
         # main step
-        opt = self.optimizers()
-        opt.zero_grad()
-
         # get data
         x = batch[KEY_IMG]
         x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode='bilinear', align_corners=False).contiguous()
@@ -235,13 +232,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         if batch_idx==0 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
             self._log_imgs('tr', x[0], masks[0], y[0])
         
-        self.manual_backward(loss)
-        opt.step()
-        
-        # scheduler
-        sch = self.lr_schedulers()
-        sch.step()
-        # return loss
+        return loss
     
 
     def validation_step(self, batch, batch_idx):
@@ -259,7 +250,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         ious = self._get_ious(masks.detach(), y)
         self.log('val_mious', ious.mean(), on_epoch=True, on_step=False, sync_dist=True)
         self.log('val_mious_pred', iou_predictions.mean(), on_epoch=True, on_step=False, sync_dist=True)
-        if batch_idx==0 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
+        if batch_idx==0 and self.trainer.global_rank==0:
             for i in range(4):
                 self._log_imgs('val', x[i], masks[i], y[i])
 
