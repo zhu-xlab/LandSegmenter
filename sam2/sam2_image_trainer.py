@@ -164,8 +164,8 @@ class SAM2ImageTrainer(pl.LightningModule):
                     lr_min = FINAL_LR
                 print(f'Initial LR (={self.lr}) is scheduled by {self.schdt} to reduce to {lr_min} in {T} epochs with a {T_warm}-epoch linear warmup stage.')
                 # lambda_func
-                step_warmup = T_warm*self.trainer.num_training_batches
-                step_total = T*self.trainer.num_training_batches
+                step_warmup = T_warm*self.n_train_batches
+                step_total = T*self.n_train_batches
                 lambda_func = lambda step: (
                     # Warmup phase: Linearly increase learning rate from warmup_lr to final_lr
                     step / step_warmup
