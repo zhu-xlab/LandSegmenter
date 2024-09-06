@@ -94,10 +94,13 @@ def set_log_files(args):
         elif args.schdt=='exp':
             args.job_type += f'_{int(args.schdv[0]*100)}'
         elif args.schdt=='cos':
-            args.job_type += f'_{int(args.schdv[0])}'
-            if len(args.schdv)>1: 
-                ea = int(np.ceil(np.log10(1/args.schdv[1])))
-                eb = int(args.schdv[1]*10**ea)
+            if args.schdv[0]>0:
+                args.job_type += f'_w{int(args.schdv[0])}_cos{int(args.schdv[1])}'
+            else:
+                args.job_type += f'_cos{int(args.schdv[1])}'
+            if len(args.schdv)>2: 
+                ea = int(np.ceil(np.log10(1/args.schdv[2])))
+                eb = int(args.schdv[2]*10**ea)
                 args.job_type += f'_f{eb}e{ea}'  # final_lr setting
     
     # saving dirs

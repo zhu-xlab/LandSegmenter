@@ -118,7 +118,7 @@ def main():
                          num_nodes=args.nodes,
                          precision='16-mixed' if args.amp else '32-true',
                          max_epochs=args.epochs, 
-                         check_val_every_n_epoch=10,
+                         check_val_every_n_epoch=args.display_inv,
                          logger=wandb_logger,
                          enable_progress_bar=True,
                          callbacks=callbacks)  

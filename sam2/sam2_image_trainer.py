@@ -62,6 +62,9 @@ class SAM2ImageTrainer(pl.LightningModule):
             the maximum area of max_sprinkle_area in low_res_masks.
         """
         super().__init__()
+        # manually enable step-based scheduler
+        self.automatic_optimization = False
+
         # copnstruct sam2-based model (image encoder and prompt encoder weights are automatically fixed)
         self.model = build_sam2(args.config_file, args.ckpt_path, args.ckpt_path_clip)
         # set up the losses: dice and focal
@@ -116,7 +119,8 @@ class SAM2ImageTrainer(pl.LightningModule):
             high_res_features=high_res_features,
         )
 
-        masks = (torch.clamp(masks, -32.0, 32.0) + 32.0)/64.0
+        # masks = (torch.clamp(masks, -32.0, 32.0) + 32.0)/64.0
+        masks = torch.clamp(masks, -32.0, 32.0)
         masks = rearrange(torch.squeeze(masks, dim=1), 
                           '(n_classes batch_size) H W -> batch_size n_classes H W',
                           batch_size=batch_size,
@@ -151,21 +155,29 @@ class SAM2ImageTrainer(pl.LightningModule):
             if self.schdt=='step':
                 print(f'Initial LR (={self.lr}) is scheduled by {self.schdt} to reduce at the {self.schdv} epochs.')
                 scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, self.schdv, gamma=0.5)
-            elif self.schdt=='cos':
-                T = int(self.schdv[0])
-                if len(self.schdv)>=2:
-                    final_lr = self.schdv[1]
-                    if len(self.schdv)>2:
-                        print(f'More values than two ({self.schdv}) are provided for cosine annealing scheduler, only the first two ({T, final_lr}) are used!')
+            elif self.schdt=='cos':   # [T_warm, T, lr_min] warm-up length, total length of cos scheduler, final lr
+                T_warm = int(self.schdv[0])
+                T = int(self.schdv[1])
+                if len(self.schdv)>=3:
+                    lr_min = self.schdv[2]
+                    if len(self.schdv)>3:
+                        print(f'More values than three ({self.schdv}) are provided for cosine annealing scheduler, only the first three ({T_warm, T, lr_min}) are used!')
                 else:
-                    final_lr = FINAL_LR
-                print(f'Initial LR (={self.lr}) is scheduled by {self.schdt} to reduce to {final_lr} in {T} epochs.')
-                if T < self.max_epochs:
-                    lambda_func = lambda epoch: (final_lr+(1+np.cos(np.pi*(epoch/T)))*(self.lr-final_lr)/2)/self.lr if epoch<T else final_lr/self.lr
-                    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_func)
-                    # scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, [sheduler1, scheduler0], milestones=[T])
-                else:
-                    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T, eta_min=final_lr)
+                    lr_min = FINAL_LR
+                print(f'Initial LR (={self.lr}) is scheduled by {self.schdt} to reduce to {lr_min} in {T} epochs with a {T_warm}-epoch linear warmup stage.')
+                # lambda_func
+                lambda_func = lambda epoch: (
+                    # Warmup phase: Linearly increase learning rate from warmup_lr to final_lr
+                    (lr_min + (self.current_step / T_warm*self.trainer.num_training_batches) / (self.lr - lr_min)) / self.lr
+                    if epoch < T_warm
+                    else (
+                    # Cosine annealing phase after warmup
+                    (lr_min + (1 + np.cos(np.pi * (epoch - T_warm) / (T - T_warm))) * (self.lr - lr_min) / 2) / self.lr
+                    if epoch < T 
+                    else 
+                    lr_min / self.lr)
+                )
+                scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_func)
             elif self.schdt=='exp':
                 gamma = self.schdv[0]
                 if len(self.schdv)>1:
@@ -178,6 +190,9 @@ class SAM2ImageTrainer(pl.LightningModule):
     # ------ Training ------ #
     def training_step(self, batch, batch_idx):
         # main step
+        opt = self.optimizers()
+        opt.zero_grad()
+
         # get data
         x = batch[KEY_IMG]
         x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode='bilinear', align_corners=False).contiguous()
@@ -219,7 +234,14 @@ class SAM2ImageTrainer(pl.LightningModule):
         # training image examples  
         if batch_idx==0 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
             self._log_imgs('tr', x[0], masks[0], y[0])
-        return loss
+        
+        self.manual_backward(loss)
+        opt.step()
+        
+        # scheduler
+        sch = self.lr_schedulers()
+        sch.step()
+        # return loss
     
 
     def validation_step(self, batch, batch_idx):
@@ -237,8 +259,9 @@ class SAM2ImageTrainer(pl.LightningModule):
         ious = self._get_ious(masks.detach(), y)
         self.log('val_mious', ious.mean(), on_epoch=True, on_step=False, sync_dist=True)
         self.log('val_mious_pred', iou_predictions.mean(), on_epoch=True, on_step=False, sync_dist=True)
-        if batch_idx==0 and self.trainer.global_rank==0:
-            self._log_imgs('val', x[0], masks[0], y[0])
+        if batch_idx==0 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
+            for i in range(4):
+                self._log_imgs('val', x[i], masks[i], y[i])
 
 
     def test_step(self, batch, batch_idx):
@@ -373,7 +396,7 @@ class SAM2ImageTrainer(pl.LightningModule):
             p = (masks[:,c]>=0.5).to(masks.dtype)
             y_ = (y==c).to(masks.dtype)
             tp = (p*y_).sum(axis=(1,2))
-            iou = tp/(p.sum(axis=(1,2))+y_.sum(axis=(1,2))-tp+eps)
+            iou = (tp+eps)/(p.sum(axis=(1,2))+y_.sum(axis=(1,2))-tp+eps)
             ious.append(iou)
         ious = torch.stack(ious, dim=1)
         return ious
