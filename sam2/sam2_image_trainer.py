@@ -226,7 +226,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         # iou loss
         ious = self._get_ious(masks.detach(), y)
         loss += self.L1Loss(iou_predictions, ious)*n_classes
-        self.log('tr_loss_', loss, on_epoch=True, on_step=False, sync_dist=True)
+        self.log('tr_loss', loss, on_epoch=True, on_step=False, sync_dist=True)
         
         # training image examples  
         if batch_idx==0 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
@@ -298,8 +298,8 @@ class SAM2ImageTrainer(pl.LightningModule):
         backbone_out = self.model.forward_image(input_image)
         _, vision_feats, _, _ = self.model._prepare_backbone_features(backbone_out)
         # Add no_mem_embed, which is added to the lowest rest feat. map during training on videos
-        if self.model.directly_add_no_mem_embed:
-            vision_feats[-1] = vision_feats[-1] + self.model.no_mem_embed
+        # if self.model.directly_add_no_mem_embed:
+        vision_feats[-1] = vision_feats[-1] + self.model.no_mem_embed
 
         feats = [
             feat.permute(1, 2, 0).view(batch_size, -1, *feat_size)

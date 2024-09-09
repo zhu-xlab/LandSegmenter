@@ -27,9 +27,9 @@ class MaskDecoder(nn.Module):
         dynamic_multimask_via_stability=False,
         dynamic_multimask_stability_delta=0.05,
         dynamic_multimask_stability_thresh=0.98,
-        pred_obj_scores: bool = False,
-        pred_obj_scores_mlp: bool = False,
-        use_multimask_token_for_obj_ptr: bool = False,
+        # pred_obj_scores: bool = False,
+        # pred_obj_scores_mlp: bool = False,
+        # use_multimask_token_for_obj_ptr: bool = False,
     ) -> None:
         """
         Predicts masks given an image and prompt embeddings, using a
@@ -57,10 +57,10 @@ class MaskDecoder(nn.Module):
         self.num_mask_tokens = num_multimask_outputs + 1
         self.mask_tokens = nn.Embedding(self.num_mask_tokens, transformer_dim)
 
-        self.pred_obj_scores = pred_obj_scores
-        if self.pred_obj_scores:
-            self.obj_score_token = nn.Embedding(1, transformer_dim)
-        self.use_multimask_token_for_obj_ptr = use_multimask_token_for_obj_ptr
+        # self.pred_obj_scores = pred_obj_scores
+        # if self.pred_obj_scores:
+        #     self.obj_score_token = nn.Embedding(1, transformer_dim)
+        # self.use_multimask_token_for_obj_ptr = use_multimask_token_for_obj_ptr
 
         self.output_upscaling = nn.Sequential(
             nn.ConvTranspose2d(
@@ -96,10 +96,10 @@ class MaskDecoder(nn.Module):
             iou_head_depth,
             sigmoid_output=iou_prediction_use_sigmoid,
         )
-        if self.pred_obj_scores:
-            self.pred_obj_score_head = nn.Linear(transformer_dim, 1)
-            if pred_obj_scores_mlp:
-                self.pred_obj_score_head = MLP(transformer_dim, transformer_dim, 1, 3)
+        # if self.pred_obj_scores:
+        #     self.pred_obj_score_head = nn.Linear(transformer_dim, 1)
+        #     if pred_obj_scores_mlp:
+        #         self.pred_obj_score_head = MLP(transformer_dim, transformer_dim, 1, 3)
 
         # When outputting a single mask, optionally we can dynamically fall back to the best
         # multimask output token if the single mask output token gives low stability scores.
@@ -172,20 +172,20 @@ class MaskDecoder(nn.Module):
         """Predicts masks. See 'forward' for more details."""
         # Concatenate output tokens
         s = 0
-        if self.pred_obj_scores:
-            output_tokens = torch.cat(
-                [
-                    self.obj_score_token.weight,
-                    self.iou_token.weight,
-                    self.mask_tokens.weight,
-                ],
-                dim=0,
-            )
-            s = 1
-        else:
-            output_tokens = torch.cat(
-                [self.iou_token.weight, self.mask_tokens.weight], dim=0
-            )
+        # if self.pred_obj_scores:
+        #     output_tokens = torch.cat(
+        #         [
+        #             self.obj_score_token.weight,
+        #             self.iou_token.weight,
+        #             self.mask_tokens.weight,
+        #         ],
+        #         dim=0,
+        #     )
+        #     s = 1
+        # else:
+        output_tokens = torch.cat(
+            [self.iou_token.weight, self.mask_tokens.weight], dim=0
+        )
         output_tokens = output_tokens.unsqueeze(0).expand(
             text_embeddings.size(0), -1, -1
         )     # text_embeddings: [bs, n_prompt, dim]; output_tokens: [bs, 2 (iou/mask_tokens), dim]

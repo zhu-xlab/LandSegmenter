@@ -143,7 +143,6 @@ def get_device_info(args):
     if args.slurm:
         args.nodes = int(os.environ["SLURM_NNODES"])
         args.devices = int(os.environ["SLURM_TASKS_PER_NODE"])
-        args.strategy = 'ddp_find_unused_parameters_true'
         args.current_device = int(os.environ["SLURM_LOCALID"])
         print(f'Slurm found with {args.nodes} nodes, {args.devices} devices per node (current:{args.current_device}).')
     else:    
@@ -169,5 +168,5 @@ def get_device_info(args):
             # print(f'Uising {args.devices} CPU cores for training!')
 
     ndevs = args.nodes * args.devices
-    args.strategy = 'ddp_find_unused_parameters_true' if ndevs>1 else 'auto'
+    args.strategy = 'ddp' if ndevs>1 else 'auto'
     return args
