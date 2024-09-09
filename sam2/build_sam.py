@@ -16,6 +16,7 @@ def build_sam2(
     config_file,
     ckpt_path=None,
     ckpt_path_clip=None,
+    load_decoder_weights=True,
     hydra_overrides_extra=[],
     apply_postprocessing=True,
     **kwargs,
@@ -33,24 +34,40 @@ def build_sam2(
     cfg = compose(config_name=config_file, overrides=hydra_overrides_extra)
     OmegaConf.resolve(cfg)
     model = instantiate(cfg.model, _recursive_=True)
-    _load_checkpoint(model, ckpt_path, ckpt_path_clip)
+    _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights)
     _fix_pretrain_weights(model)
     return model
 
 
-def _load_checkpoint(model, ckpt_path, ckpt_path_clip):
+def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights):
     if ckpt_path is not None:
         sd = torch.load(ckpt_path, map_location="cpu")["model"]
-        missing_keys, unexpected_keys = model.load_state_dict(sd, strict=False)
-        if missing_keys:
-            # print(missing_keys)
-            for mk in missing_keys:
-                if mk.startswith('image_encoder') or mk.startswith("sam_mask_decoder"):
-                    raise RuntimeError(f'Unexpected missing key: {mk}')
-        # if unexpected_keys:
-            # print(unexpected_keys)
+        if load_decoder_weights:
+            missing_keys, unexpected_keys = model.load_state_dict(sd, strict=False)
+            if missing_keys:
+                # print(missing_keys)
+                for mk in missing_keys:
+                    if mk.startswith('image_encoder') or mk.startswith("sam_mask_decoder") or mk.startswith("no_mem_embed"):
+                        raise RuntimeError(f'Unexpected missing key: {mk}')
+            print("Loaded image encoder and decoder weights from SAM2 checkpoint")
+        else:
+            sd_new = sd.copy()
+            for k in sd:
+                if k.startswith("sam_mask_decoder"):
+                    sd_new.pop(k)
+            missing_keys, unexpected_keys = model.load_state_dict(sd_new, strict=False)
+            missing_keys_contain_decoder = False
+            if missing_keys:
+                for mk in missing_keys:
+                    if mk.startswith('image_encoder') or mk.startswith("no_mem_embed"):
+                        raise RuntimeError(f'Unexpected missing key: {mk}')
+                    if mk.startswith("sam_mask_decoder"):
+                        missing_keys_contain_decoder = True
+            if not missing_keys_contain_decoder:
+                raise RuntimeError('Require not to load decoder weights, but missing keys do not contain decoder')    
+            print("Loaded encoder weights from SAM2 checkpoint")                
     else:
-        print("No checkpoint provided, initializing sam2 model with random weights")
+        print("No SAM2 checkpoint provided, initializing SAM2 model with random weights")
         
     # load clip model
     if ckpt_path_clip is not None:
@@ -60,10 +77,9 @@ def _load_checkpoint(model, ckpt_path, ckpt_path_clip):
             for mk in missing_keys:
                 if mk.startswith('sam_prompt_encoder'):
                     raise RuntimeError(f'Unexpected missing key when loading CLIP weights: {mk}')
-            # print(missing_keys)
-        # if unexpected_keys:
-            # print(unexpected_keys)
-        # logging.info("Loaded checkpoint sucessfully")
+        print("Loaded prompt encoder weights from CLIP checkpoint")
+    else:
+        print("No CLIP checkpoint provided, initializing prompt encoder with random weights")
     return
 
 

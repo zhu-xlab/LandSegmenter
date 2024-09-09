@@ -63,7 +63,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         """
         super().__init__()
         # copnstruct sam2-based model (image encoder and prompt encoder weights are automatically fixed)
-        self.model = build_sam2(args.config_file, args.ckpt_path, args.ckpt_path_clip)
+        self.model = build_sam2(args.config_file, args.ckpt_path, args.ckpt_path_clip, args.load_de)
         # set up the losses: dice and focal
         self._get_loss()
 

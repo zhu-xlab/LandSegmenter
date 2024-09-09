@@ -46,6 +46,7 @@ def get_common_args(parser):
     parser.add_argument('--model-config-file', dest='config_file', type=str, default='sam2_hiera_l.yaml', help='Path to the model config file')
     parser.add_argument('--ckpt-path', type=str, default='checkpoints/sam2_hiera_large.pt', help='Path to the checkpoint file (sam2)')
     parser.add_argument('--ckpt-path-clip', type=str, default='checkpoints/RemoteCLIP-ViT-B-32.pt', help='Path to the checkpoint file (clip)') 
+    parser.add_argument('--load-decoder-weights', dest='load_de', action='store_true', default=False, help='Whether to load decoder weights or not')
     parser.add_argument('--resume', type=str, default=False, help='Path of the checkpoint file from which the training is resumed.')
     # device settings
     parser.add_argument('--accelerator', type=str, default='cpu', choices=['cpu','gpu'], help='Type of used accelerator')
@@ -79,6 +80,8 @@ def set_log_files(args):
         args.gname = f'test_remoteclip_DW_GT_{args.ntr}'
     else:
         args.gname = f'test_remoteclip_DW_GT_all'
+    # using pretrained decoder or not
+    args.gname += '_deI' if args.load_de else '_deN'
         
     # job type
     args.job_type = f'{int(args.wfocal)}F_{int(args.wdice)}D' 
