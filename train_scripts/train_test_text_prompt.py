@@ -85,8 +85,8 @@ def main():
     if args.val == 0:
         # version 1 - do not use validation set
         train_loader = get_dataloader(train_dataset, args.bs, True)
-        n_batch_tr, n_batch_ts = int(len(train_dataset)/args.bs), int(len(test_dataset)/args.tbs)
-        print(f'len/n_batch of train, test:{len(train_dataset)}/{n_batch_tr}, {len(test_dataset)}/{n_batch_ts}')
+        args.n_batch_tr, args.n_batch_ts = int(len(train_dataset)/args.bs), int(len(test_dataset)/args.tbs)
+        print(f'len/n_batch of train, test:{len(train_dataset)}/{args.n_batch_tr}, {len(test_dataset)}/{args.n_batch_ts}')
     else:
         # version 2 - seperate a small part of data from the training set to construct the validation set
         n_val = int(len(train_dataset) * args.val)
@@ -95,8 +95,9 @@ def main():
         # construct dataloaders
         train_loader = get_dataloader(train_set, args.bs, True)
         val_loader = get_dataloader(val_set, args.tbs, False)
-        n_batch_tr, n_batch_val, n_batch_ts = int(len(train_set)/args.bs), int(len(val_set)/args.tbs), int(len(test_dataset)/args.tbs)
-        print(f'len/n_batch of train, val, test:{len(train_set)}/{n_batch_tr}, {len(val_set)}/{n_batch_val}, {len(test_dataset)}/{n_batch_ts}')
+        args.n_batch_tr, args.n_batch_val, args.n_batch_ts = \
+            int(len(train_set)/args.bs), int(len(val_set)/args.tbs), int(len(test_dataset)/args.tbs)
+        print(f'len/n_batch of train, val, test:{len(train_set)}/{args.n_batch_tr}, {len(val_set)}/{args.n_batch_val}, {len(test_dataset)}/{args.n_batch_ts}')
         
     
     ###### 3 - define the model ######
