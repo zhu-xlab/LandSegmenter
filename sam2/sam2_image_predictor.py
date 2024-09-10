@@ -103,7 +103,7 @@ class SAM2ImagePredictor:
         self.reset_predictor()
         # Transform the image to the form expected by the model
         if isinstance(image, np.ndarray):
-            logging.info("For numpy array image, we assume (HxWxC) format")
+            print("For numpy array image, we assume (HxWxC) format")
             self._orig_hw = [image.shape[:2]]
         elif isinstance(image, Image):
             w, h = image.size
@@ -117,12 +117,11 @@ class SAM2ImagePredictor:
         assert (
             len(input_image.shape) == 4 and input_image.shape[1] == 3
         ), f"input_image must be of size 1x3xHxW, got {input_image.shape}"
-        logging.info("Computing image embeddings for the provided image...")
+        print("Computing image embeddings for the provided image...")
         backbone_out = self.model.forward_image(input_image)
-        _, vision_feats, _, _ = self.model._prepare_backbone_features(backbone_out)
+        vision_feats = self.model._prepare_backbone_features(backbone_out)
         # Add no_mem_embed, which is added to the lowest rest feat. map during training on videos
-        if self.model.directly_add_no_mem_embed:
-            vision_feats[-1] = vision_feats[-1] + self.model.no_mem_embed
+        vision_feats[-1] = vision_feats[-1] + self.model.no_mem_embed
 
         feats = [
             feat.permute(1, 2, 0).view(1, -1, *feat_size)
@@ -130,7 +129,7 @@ class SAM2ImagePredictor:
         ][::-1]
         self._features = {"image_embed": feats[-1], "high_res_feats": feats[:-1]}
         self._is_image_set = True
-        logging.info("Image embeddings computed.")
+        print("Image embeddings computed.")
 
     @torch.no_grad()
     def set_image_batch(
@@ -247,7 +246,7 @@ class SAM2ImagePredictor:
         # mask_input: Optional[np.ndarray] = None,
         multimask_output: bool = True,
         return_logits: bool = False,
-        normalize_coords=True,
+        # normalize_coords=True,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Predict masks for the given input prompts, using the currently set image.
@@ -292,10 +291,6 @@ class SAM2ImagePredictor:
         text_tokens = self._prep_prompts(texts)
 
         masks, iou_predictions, low_res_masks = self._predict(
-            # unnorm_coords,
-            # labels,
-            # unnorm_box,
-            # mask_input,
             text_tokens,
             multimask_output,
             return_logits=return_logits,
@@ -337,10 +332,6 @@ class SAM2ImagePredictor:
     def _predict(
         self,
         text_tokens: torch.Tensor,
-        # point_coords: Optional[torch.Tensor],
-        # point_labels: Optional[torch.Tensor],
-        # boxes: Optional[torch.Tensor] = None,
-        # mask_input: Optional[torch.Tensor] = None,
         multimask_output: bool = True,
         return_logits: bool = False,
         img_idx: int = -1,
@@ -385,55 +376,23 @@ class SAM2ImagePredictor:
                 "An image must be set with .set_image(...) before mask prediction."
             )
 
-        # if point_coords is not None:
-        #     concat_points = (point_coords, point_labels)
-        # else:
-        #     concat_points = None
-
-        # # Embed prompts
-        # if boxes is not None:
-        #     box_coords = boxes.reshape(-1, 2, 2)
-        #     box_labels = torch.tensor([[2, 3]], dtype=torch.int, device=boxes.device)
-        #     box_labels = box_labels.repeat(boxes.size(0), 1)
-        #     # we merge "boxes" and "points" into a single "concat_points" input (where
-        #     # boxes are added at the beginning) to sam_prompt_encoder
-        #     if concat_points is not None:
-        #         concat_coords = torch.cat([box_coords, concat_points[0]], dim=1)
-        #         concat_labels = torch.cat([box_labels, concat_points[1]], dim=1)
-        #         concat_points = (concat_coords, concat_labels)
-        #     else:
-        #         concat_points = (box_coords, box_labels)
-
-        # sparse_embeddings, dense_embeddings = self.model.sam_prompt_encoder(
-        #     points=concat_points,
-        #     boxes=None,
-        #     masks=mask_input,
-        # )
-
         text_embeddings = self.model.sam_prompt_encoder(text_tokens) # dim=512 (clip dim)
         text_embeddings = self.model.sam_prompt_fn(text_embeddings)  # dim=256
-        # text_tokens shape: torch.Size([1, 77])
-        # text_embedding shape: torch.Size([1, 256])
 
         ########################!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         # # Predict masks
         # batched_mode = (
         #     concat_points is not None and concat_points[0].shape[0] > 1
         # )  # multi object prediction
-        batched_mode = False
         n_textembed = text_embeddings.shape[0]
         high_res_features = [
             feat_level[img_idx].unsqueeze(0).repeat(n_textembed, 1, 1, 1)
             for feat_level in self._features["high_res_feats"]
         ]
-        low_res_masks, iou_predictions, _, _ = self.model.sam_mask_decoder(
+        low_res_masks, iou_predictions = self.model.sam_mask_decoder(
             image_embeddings=self._features["image_embed"][img_idx].unsqueeze(0).repeat(n_textembed, 1, 1, 1),
             text_embeddings=text_embeddings.unsqueeze(1),
-            # image_pe=self.model.sam_prompt_encoder.get_dense_pe(),
-            # sparse_prompt_embeddings=sparse_embeddings,
-            # dense_prompt_embeddings=dense_embeddings,
             multimask_output=multimask_output,
-            repeat_image=batched_mode,
             high_res_features=high_res_features,
         )
 
@@ -464,7 +423,7 @@ class SAM2ImagePredictor:
 
     @property
     def device(self) -> torch.device:
-        return self.model.device
+        return next(self.model.image_encoder.parameters()).device
 
     def reset_predictor(self) -> None:
         """

@@ -30,7 +30,7 @@ class SAM2Transforms(nn.Module):
         self.transforms = torch.jit.script(
             nn.Sequential(
                 Resize((self.resolution, self.resolution)),
-                Normalize(self.mean, self.std),
+                # Normalize(self.mean, self.std),
             )
         )
 

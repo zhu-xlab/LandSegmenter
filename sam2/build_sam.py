@@ -17,8 +17,10 @@ def build_sam2(
     ckpt_path=None,
     ckpt_path_clip=None,
     load_decoder_weights=True,
+    test_mode=False,
     hydra_overrides_extra=[],
     apply_postprocessing=True,
+    device=torch.device("cpu"),
     **kwargs,
 ):
 
@@ -34,8 +36,13 @@ def build_sam2(
     cfg = compose(config_name=config_file, overrides=hydra_overrides_extra)
     OmegaConf.resolve(cfg)
     model = instantiate(cfg.model, _recursive_=True)
-    _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights)
-    _fix_pretrain_weights(model)
+    if test_mode:
+        _load_checkpoint_test(model, ckpt_path)
+        model = model.to(device)
+        model.eval()
+    else:
+        _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights)
+        _fix_pretrain_weights(model)
     return model
 
 
@@ -43,12 +50,12 @@ def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights):
     if ckpt_path is not None:
         sd = torch.load(ckpt_path, map_location="cpu")["model"]
         if load_decoder_weights:
-            assert not model.use_auxiliary_decoder, "Auxiliary decoder is not supported when load_decoder_weights is True"
+            # assert not model.use_auxiliary_decoder, "Auxiliary decoder is not supported when load_decoder_weights is True"
             missing_keys, unexpected_keys = model.load_state_dict(sd, strict=False)
             if missing_keys:
                 # print(missing_keys)
                 for mk in missing_keys:
-                    if mk.startswith('image_encoder') or mk.startswith("sam_mask_decoder") or mk.startswith("no_mem_embed"):
+                    if mk.startswith('image_encoder') or mk.startswith("sam_mask_decoder.") or mk.startswith("no_mem_embed"):
                         raise RuntimeError(f'Unexpected missing key: {mk}')
             print("Loaded image encoder and decoder weights from SAM2 checkpoint")
         else:
@@ -60,9 +67,9 @@ def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights):
             missing_keys_contain_decoder = False
             if missing_keys:
                 for mk in missing_keys:
-                    if mk.startswith('image_encoder'):
+                    if mk.startswith('image_encoder') or mk.startswith("no_mem_embed"):
                         raise RuntimeError(f'Unexpected missing key: {mk}')
-                    if mk.startswith("sam_mask_decoder"):
+                    if mk.startswith("sam_mask_decoder."):
                         missing_keys_contain_decoder = True
             if not missing_keys_contain_decoder:
                 raise RuntimeError('Require not to load decoder weights, but missing keys do not contain decoder')    
@@ -82,6 +89,22 @@ def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights):
     else:
         print("No CLIP checkpoint provided, initializing prompt encoder with random weights")
     return
+
+
+def _load_checkpoint_test(model, ckpt_path):
+    pref = 'model.'
+    if ckpt_path is not None:
+        sd_ = torch.load(ckpt_path, map_location="cpu")["state_dict"]
+        sd = sd_.copy()
+        for k in sd_:
+            sd[k[len(pref):]] = sd_[k]
+            sd.pop(k)
+        missing_keys, unexpected_keys = model.load_state_dict(sd, strict=False)
+        if missing_keys:
+            raise RuntimeError("Found missing keys")
+        # if unexpected_keys:
+        #     raise RuntimeError("Found unexpected keys")
+        print("Loaded checkpoint sucessfully")
 
 
 def _fix_pretrain_weights(model):

@@ -282,7 +282,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         logging.info("Computing image embeddings for the provided image...")
         batch_size = input_image.shape[0]
         backbone_out = self.model.forward_image(input_image)
-        _, vision_feats, _, _ = self.model._prepare_backbone_features(backbone_out)
+        vision_feats = self.model._prepare_backbone_features(backbone_out)
         # Add no_mem_embed, which is added to the lowest rest feat. map during training on videos
         # if self.model.directly_add_no_mem_embed:
         vision_feats[-1] = vision_feats[-1] + self.model.no_mem_embed
