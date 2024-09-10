@@ -43,6 +43,7 @@ def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights):
     if ckpt_path is not None:
         sd = torch.load(ckpt_path, map_location="cpu")["model"]
         if load_decoder_weights:
+            assert not model.use_auxiliary_decoder, "Auxiliary decoder is not supported when load_decoder_weights is True"
             missing_keys, unexpected_keys = model.load_state_dict(sd, strict=False)
             if missing_keys:
                 # print(missing_keys)
@@ -59,7 +60,7 @@ def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights):
             missing_keys_contain_decoder = False
             if missing_keys:
                 for mk in missing_keys:
-                    if mk.startswith('image_encoder') or mk.startswith("no_mem_embed"):
+                    if mk.startswith('image_encoder'):
                         raise RuntimeError(f'Unexpected missing key: {mk}')
                     if mk.startswith("sam_mask_decoder"):
                         missing_keys_contain_decoder = True

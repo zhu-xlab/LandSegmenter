@@ -91,6 +91,19 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.n_train_batches = int(args.n_batch_tr/(args.nodes*args.devices))
         # display interval
         self.display_inv = args.display_inv
+        
+        # co-teaching
+        assert self.model.use_auxiliary_decoder, "Auxiliary decoder is required for using weak labels with co-teaching"
+        # for sample selection
+        self.rampup_type = args.rampup_type
+        self.rampup_length = args.rampup_length
+        self.init_forget_rate = args.init_forget_rate  # initial forget rate
+        self.forget_rate = args.forget_rate            # final forget rate
+        assert self.init_forget_rate<=self.forget_rate, \
+                f'Initial forget rate ({self.init_forget_rate}) should be less than the final one ({self.forget_rate})!'
+        
+        # # This property activates manual optimization.
+        # self.automatic_optimization = False
 
 
     # ------ forward propogation ------ #
@@ -110,10 +123,19 @@ class SAM2ImageTrainer(pl.LightningModule):
         high_res_features = [
             feat_level.repeat(n_classes, 1, 1, 1) for feat_level in img_feats["high_res_feats"]
         ]
+        high_res_features_aux = [
+            feat_level.repeat(n_classes, 1, 1, 1) for feat_level in img_feats["high_res_feats_aux"]
+        ]
+        # decoder
         masks, iou_predictions = self._pred_mask_and_iou(
+            self.model.sam_mask_decoder,
             img_feats["image_embed"], text_embeddings, high_res_features, n_classes, batch_size)
+        # auxiliary decoder
+        masks_aux, iou_predictions_aux = self._pred_mask_and_iou(
+            self.model.sam_mask_decoder_aux,
+            img_feats["image_embed"], text_embeddings, high_res_features_aux, n_classes, batch_size)
         
-        return masks, iou_predictions
+        return masks, masks_aux, iou_predictions, iou_predictions_aux
     
 
     # ------ Optimizer ------ #
@@ -139,6 +161,7 @@ class SAM2ImageTrainer(pl.LightningModule):
             if self.schdt=='step':
                 print(f'Initial LR (={self.lr}) is scheduled by {self.schdt} to reduce at the {self.schdv} epochs.')
                 scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, self.schdv, gamma=0.5)
+                interval = 'epoch'
             elif self.schdt=='cos':   # [T_warm, T, lr_min] warm-up length, total length of cos scheduler, final lr
                 T_warm = int(self.schdv[0])
                 T = int(self.schdv[1])
@@ -164,18 +187,24 @@ class SAM2ImageTrainer(pl.LightningModule):
                     lr_min / self.lr)
                 )
                 scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_func)
+                interval = 'step'
             elif self.schdt=='exp':
                 gamma = self.schdv[0]
                 if len(self.schdv)>1:
                     print(f'More values than one ({self.schdv}) are provided for exponential scheduler, only the first one ({gamma}) is used!')
                 scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma)
+                interval = 'epoch'
                 print(f'Initial LR (={self.lr}) is scheduled by {self.schdt} with gamma={gamma}.')
-            return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step"},}
+            return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": interval},}
     
 
     # ------ Training ------ #
     def training_step(self, batch, batch_idx):
         # main step
+        # # optimizers
+        # opt = self.optimizers()
+        # if self.schdt!='none': sch, sch_aux = self.lr_schedulers()
+
         # get data
         x = batch[KEY_IMG]
         x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode='bilinear', align_corners=False).contiguous()
@@ -185,40 +214,56 @@ class SAM2ImageTrainer(pl.LightningModule):
         # assert lbl_type in [0, 1], 'Please provide correct label type (0 - gt, 1 - ns)!'
         
         # prediction
-        masks, iou_predictions = self.forward(x, prompt_tokens)
-        
-        # prepare labels
-        # if lbl_type==1: # ns labels
-        #     y1 = y.copy()
-        #     y2 = y
-        # else: # gt labels
-        #     y1 = y2 = y
-        # calculate losses 
-        loss = torch.tensor(0.0, device=self.device)
-        # # multi-class loss
-        # for L, w in zip([self.DLoss, self.FLoss], [self.wdice, self.wfocal]):
-        #     loss_ = w*L(masks, y)
-        #     loss += loss_
-        # self.log('tr_loss_multic', loss, on_epoch=True, on_step=False, sync_dist=True)
-        # binary loss
+        masks, masks_aux, iou_predictions, iou_predictions_aux = self.forward(x, prompt_tokens)
+
+        # sample selection
+        m_discard, m_discard_aux = self._get_selection_masks(masks.detach(), 
+                                                             masks_aux.detach(), 
+                                                             y.detach(), n_classes)
+        y_org, y_aux = y.clone(), y.clone()
+        y[m_discard] = MASK_CODE
+        y_aux[m_discard_aux] = MASK_CODE
+
+        # calculate losses
+        loss, loss_aux = torch.tensor(0.0, device=self.device), torch.tensor(0.0, device=self.device)       
+        # loss
         for L, w in zip([self.BDLoss, self.BFLoss], [self.wdice, self.wfocal]):
-            for c in range(n_classes):  
-                y_ = (y==c).to(y.dtype)
-                y_[y==MASK_CODE] = MASK_CODE
-                loss_ = w*L(masks[:,c], y_)
+            for c in range(n_classes):
+                # loss  
+                yc = (y==c).to(y.dtype)
+                yc[y==MASK_CODE] = MASK_CODE
+                loss_ = w*L(masks[:,c], yc)
                 loss += loss_
+                # loss_aux
+                yc = (y_aux==c).to(y_aux.dtype)
+                yc[y_aux==MASK_CODE] = MASK_CODE
+                loss_aux_ = w*L(masks_aux[:,c], yc)
+                loss_aux += loss_aux_
         self.log('tr_loss_mask', loss, on_epoch=True, on_step=False, sync_dist=True)
+        self.log('tr_loss_mask_aux', loss_aux, on_epoch=True, on_step=False, sync_dist=True)
         
         # iou loss
-        ious = self._get_ious(masks.detach(), y)
+        ious = self._get_ious(masks.detach(), y_org)
+        ious_aux = self._get_ious(masks_aux.detach(), y_org)
         loss += self.L1Loss(iou_predictions, ious)*n_classes
+        loss_aux += self.L1Loss(iou_predictions_aux, ious_aux)*n_classes
+
         self.log('tr_loss', loss, on_epoch=True, on_step=False, sync_dist=True)
+        self.log('tr_loss_aux', loss_aux, on_epoch=True, on_step=False, sync_dist=True)
         
         # training image examples  
         if batch_idx==0 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
-            self._log_imgs('tr', x[0], masks[0], y[0])
+            self._log_imgs('tr', x[0], masks[0], y_org[0])
+            self._log_imgs('tr_aux', x[0], masks_aux[0], y_aux[0])
         
-        return loss
+        # opt.zero_grad()
+        # self.manual_backward(loss+loss_aux)
+        # opt.step()
+
+        # for name, param in self.model.named_parameters():
+        #     if param.grad is None:
+        #         print(self.device, name)
+        return loss+loss_aux
     
 
     def validation_step(self, batch, batch_idx):
@@ -230,7 +275,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         prompt_tokens, y, n_classes = self._prepare_prompt(CLS_DICT, y, train_mode=False)
         
         # prediction
-        masks, iou_predictions = self.forward(x, prompt_tokens)
+        masks, masks_aux, iou_predictions, iou_predictions_aux = self.forward(x, prompt_tokens)
         
         # ious
         ious = self._get_ious(masks.detach(), y)
@@ -239,6 +284,13 @@ class SAM2ImageTrainer(pl.LightningModule):
         if batch_idx==0 and self.trainer.global_rank==0:
             for i in range(4):
                 self._log_imgs('val', x[i], masks[i], y[i])
+        # iou auxilary
+        ious_aux = self._get_ious(masks_aux.detach(), y)
+        self.log('val_mious_aux', ious_aux.mean(), on_epoch=True, on_step=False, sync_dist=True)
+        self.log('val_mious_pred_aux', iou_predictions_aux.mean(), on_epoch=True, on_step=False, sync_dist=True)
+        if batch_idx==0 and self.trainer.global_rank==0:
+            for i in range(4):
+                self._log_imgs('val_aux', x[i], masks_aux[i], y[i])
 
 
     def test_step(self, batch, batch_idx):
@@ -250,7 +302,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         prompt_tokens, y, n_classes = self._prepare_prompt(CLS_DICT, y, train_mode=False)
         
         # prediction
-        masks, iou_predictions = self.forward(x, prompt_tokens)
+        masks, masks_aux, iou_predictions, iou_predictions_aux = self.forward(x, prompt_tokens)
 
         # ious
         ious = self._get_ious(masks.detach(), y)
@@ -282,7 +334,12 @@ class SAM2ImageTrainer(pl.LightningModule):
         logging.info("Computing image embeddings for the provided image...")
         batch_size = input_image.shape[0]
         backbone_out = self.model.forward_image(input_image)
-        _, vision_feats, _, _ = self.model._prepare_backbone_features(backbone_out)
+        vision_feats, vision_feats_aux = self.model._prepare_backbone_features(backbone_out)
+        # print("vision_feats:", len(vision_feats))
+        # for i in vision_feats: print(self.device, i.shape)
+        # print("vision_feats_aux:", len(vision_feats_aux))
+        # for i in vision_feats_aux: print(self.device, 'aux', i.shape)
+        # _, vision_feats, _, _ = self.model._prepare_backbone_features(backbone_out)
         # Add no_mem_embed, which is added to the lowest rest feat. map during training on videos
         # if self.model.directly_add_no_mem_embed:
         vision_feats[-1] = vision_feats[-1] + self.model.no_mem_embed
@@ -291,7 +348,11 @@ class SAM2ImageTrainer(pl.LightningModule):
             feat.permute(1, 2, 0).view(batch_size, -1, *feat_size)
             for feat, feat_size in zip(vision_feats[::-1], self._bb_feat_sizes[::-1])
         ][::-1]
-        features = {"image_embed": feats[-1], "high_res_feats": feats[:-1]}  # self._features
+        feats_aux = [
+            feat.permute(1, 2, 0).view(batch_size, -1, *feat_size)
+            for feat, feat_size in zip(vision_feats_aux[::-1], self._bb_feat_sizes[:-1][::-1])
+        ][::-1]
+        features = {"image_embed": feats[-1], "high_res_feats": feats[:-1], "high_res_feats_aux": feats_aux}
         return features
     
 
@@ -345,8 +406,8 @@ class SAM2ImageTrainer(pl.LightningModule):
         return result, gt, n_prompt
 
 
-    def _pred_mask_and_iou(self, img_embeddings, text_embeddings, high_res_features, n_classes, batch_size):
-        masks, iou_predictions = self.model.sam_mask_decoder(
+    def _pred_mask_and_iou(self, decoder, img_embeddings, text_embeddings, high_res_features, n_classes, batch_size):
+        masks, iou_predictions = decoder(
             image_embeddings=img_embeddings.repeat(n_classes, 1, 1, 1),
             multimask_output=self.multimask_output,
             text_embeddings=text_embeddings.unsqueeze(1),
@@ -367,8 +428,8 @@ class SAM2ImageTrainer(pl.LightningModule):
 
     
     def _get_loss(self):
-        # # Cross Entropy
-        # self.CELoss = nn.CrossEntropyLoss(ignore_index=MASK_CODE)  
+        # Cross Entropy - for sample selection
+        self.BCELoss = nn.BCEWithLogitsLoss(reduction='none')  
         # Dice
         # self.DLoss = DiceLoss(mode='multiclass', 
         #                       from_logits=True, 
@@ -386,6 +447,39 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.L1Loss = nn.L1Loss()
 
         return
+    
+
+    def _get_selection_masks(self, p, p_aux, y, n_classes):
+        for v in [p, p_aux, y]:
+            if v.grad_fn is not None:
+                raise ValueError('The input tensors for the selection mask generation fucntion should not require gradients!')
+
+        # get number of samples to select
+        forget_rate = self._get_current_forget_rate(self.current_epoch)
+        remember_rate = 1 - forget_rate
+        self.log('forget_rate', forget_rate, on_epoch=True, on_step=False, sync_dist=True)
+        
+        # initialize discard masks
+        m_discard = torch.zeros_like(y, dtype=torch.bool, device=self.device, requires_grad=False)
+        m_discard_aux = torch.zeros_like(y, dtype=torch.bool, device=self.device, requires_grad=False)
+        
+        if forget_rate>0:
+            # calculate BCE losses
+            l_select = torch.zeros_like(y, dtype=p.dtype, device=self.device, requires_grad=False)
+            l_select_aux = torch.zeros_like(y, dtype=p.dtype, device=self.device, requires_grad=False)
+            for c in range(n_classes):
+                y_ = (y==c).float()
+                l_select += self.BCELoss(p[:,c], y_)
+                l_select_aux += self.BCELoss(p_aux[:,c], y_)
+            
+            # select samples
+            for c in range(n_classes):
+                if (y==c).sum()>0:
+                    thr = torch.quantile(l_select[y==c].float(), remember_rate)
+                    thr_aux = torch.quantile(l_select_aux[y==c].float(), remember_rate)
+                    m_discard[y==c] = (l_select_aux[y==c]>thr_aux)
+                    m_discard_aux[y==c] = (l_select[y==c]>thr)
+        return m_discard, m_discard_aux
 
 
     def _get_ious(self, masks, y, eps=1e-8):
@@ -423,6 +517,26 @@ class SAM2ImageTrainer(pl.LightningModule):
             rgb_img = x[0,[3,2,1]].detach().cpu().numpy().transpose((1,2,0))
         mask_img = wandb.Image(rgb_img, masks=masks)
         wandb.log({f'{prefix}_masks': mask_img})
+
+
+    def _get_current_forget_rate(self, current_epoch):
+        exp_ind = 5
+        cepoch = min(current_epoch, self.rampup_length)
+        if self.rampup_type=='linear':
+            current_forget_rate = self.init_forget_rate + \
+                                    (self.forget_rate-self.init_forget_rate)*cepoch/self.rampup_length
+        elif self.rampup_type=='sigmoid':
+            """sigmoid rampup from https://arxiv.org/abs/1610.02242"""
+            # assert exp_ind>=5, 'sigmoid index should be greater than 5!'
+            if current_epoch==0:
+                current_forget_rate = 0.
+            else:
+                x = 1-cepoch/self.rampup_length
+                current_forget_rate = self.init_forget_rate + \
+                                        np.exp(-exp_ind * (x**2)) * (self.forget_rate-self.init_forget_rate)
+        else:
+            current_forget_rate = self.forget_rate
+        return current_forget_rate
     
 
 

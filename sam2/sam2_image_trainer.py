@@ -110,23 +110,9 @@ class SAM2ImageTrainer(pl.LightningModule):
         high_res_features = [
             feat_level.repeat(n_classes, 1, 1, 1) for feat_level in img_feats["high_res_feats"]
         ]
-        masks, iou_predictions = self.model.sam_mask_decoder(
-            image_embeddings=img_feats["image_embed"].repeat(n_classes, 1, 1, 1),
-            multimask_output=self.multimask_output,
-            text_embeddings=text_embeddings.unsqueeze(1),
-            high_res_features=high_res_features,
-        )
-
-        # masks = (torch.clamp(masks, -32.0, 32.0) + 32.0)/64.0
-        masks = torch.clamp(masks, -32.0, 32.0)
-        masks = rearrange(torch.squeeze(masks, dim=1), 
-                          '(n_classes batch_size) H W -> batch_size n_classes H W',
-                          batch_size=batch_size,
-                          n_classes=n_classes)
-        iou_predictions = rearrange(torch.squeeze(iou_predictions, dim=1), 
-                                    '(n_classes batch_size) -> batch_size n_classes',
-                                    batch_size=batch_size,
-                                    n_classes=n_classes)
+        masks, iou_predictions = self._pred_mask_and_iou(
+            img_feats["image_embed"], text_embeddings, high_res_features, n_classes, batch_size)
+        
         return masks, iou_predictions
     
 
@@ -358,6 +344,27 @@ class SAM2ImageTrainer(pl.LightningModule):
 
         return result, gt, n_prompt
 
+
+    def _pred_mask_and_iou(self, img_embeddings, text_embeddings, high_res_features, n_classes, batch_size):
+        masks, iou_predictions = self.model.sam_mask_decoder(
+            image_embeddings=img_embeddings.repeat(n_classes, 1, 1, 1),
+            multimask_output=self.multimask_output,
+            text_embeddings=text_embeddings.unsqueeze(1),
+            high_res_features=high_res_features,
+        )
+
+        # masks = (torch.clamp(masks, -32.0, 32.0) + 32.0)/64.0
+        masks = torch.clamp(masks, -32.0, 32.0)
+        masks = rearrange(torch.squeeze(masks, dim=1), 
+                          '(n_classes batch_size) H W -> batch_size n_classes H W',
+                          batch_size=batch_size,
+                          n_classes=n_classes)
+        iou_predictions = rearrange(torch.squeeze(iou_predictions, dim=1), 
+                                    '(n_classes batch_size) -> batch_size n_classes',
+                                    batch_size=batch_size,
+                                    n_classes=n_classes)
+        return masks, iou_predictions
+    
     
     def _get_loss(self):
         # # Cross Entropy

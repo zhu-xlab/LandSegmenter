@@ -40,7 +40,6 @@ SDTYPE = {1:np.float32, 2:np.uint16}
 
 CLS_DICT = {0:'Water', 1:'Trees', 2:'Grass', 3:'Flooded vegetation', 4:'Crops', 5:'Shrub and Scrub', 6:'Built area', 7:'Bare land', 8:'Ice and Snow'}
             
-FINAL_LR = 1e-8
 KEY_IMG = 'image'
 KEY_LBL = 'label'
 KEY_CLSN = 'cn_dict'
@@ -115,7 +114,7 @@ def s1_exclude_outliers(img, head_rate=1, tail_rate=99):
     
 def single_band_normalize(img, mean, std, clip=False):
     if clip:
-        scale = 3
+        scale = 2
         min_value = mean - scale * std
         max_value = mean + scale * std
         img = np.clip(img, min_value, max_value)

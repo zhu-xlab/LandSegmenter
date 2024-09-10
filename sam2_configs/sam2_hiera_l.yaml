@@ -26,10 +26,12 @@ model:
       backbone_channel_list: [1152, 576, 288, 144]
       fpn_top_down_levels: [2, 3]  # output level 0 and 1 directly use the backbone features
       fpn_interp_model: nearest
-
+  # auxiliary decoder
+  use_auxiliary_decoder: True
+  # image size
   image_size: 1024
   # use high-resolution feature map in the SAM mask decoder
-  use_high_res_features_in_sam: true
+  use_high_res_features_in_sam: True
   # SAM heads
   iou_prediction_use_sigmoid: True
   # Compilation flag

@@ -23,6 +23,7 @@ class SAM2Base(torch.nn.Module):
     def __init__(
         self,
         image_encoder,
+        use_auxiliary_decoder=False,
         image_size=512,
         backbone_stride=16,  # stride of the image backbone output
         use_high_res_features_in_sam=False,
@@ -32,8 +33,10 @@ class SAM2Base(torch.nn.Module):
     ):
         super().__init__()
 
-        # Part 1: the image backbone
+        # image backbone
         self.image_encoder = image_encoder
+        # auxiliary decoder for co-teaching
+        self.use_auxiliary_decoder = use_auxiliary_decoder
         # Use level 0, 1, 2 for high-res setting, or just level 2 for the default setting
         self.use_high_res_features_in_sam = use_high_res_features_in_sam
         self.num_feature_levels = 3 if use_high_res_features_in_sam else 1
@@ -101,6 +104,23 @@ class SAM2Base(torch.nn.Module):
             iou_prediction_use_sigmoid=self.iou_prediction_use_sigmoid,
             **(self.sam_mask_decoder_extra_args or {}),
         )
+        # for co-teaching
+        if self.use_auxiliary_decoder:
+            self.sam_mask_decoder_aux = MaskDecoder(
+                num_multimask_outputs=3,
+                transformer=TwoWayTransformer(
+                    depth=2,
+                    embedding_dim=self.sam_prompt_embed_dim,
+                    mlp_dim=2048,
+                    num_heads=8,
+                ),
+                transformer_dim=self.sam_prompt_embed_dim,
+                iou_head_depth=3,
+                iou_head_hidden_dim=256,
+                use_high_res_features=self.use_high_res_features_in_sam,
+                iou_prediction_use_sigmoid=self.iou_prediction_use_sigmoid,
+                **(self.sam_mask_decoder_extra_args or {}),
+            )
         
 
     def forward_image(self, img_batch: torch.Tensor):
@@ -109,6 +129,16 @@ class SAM2Base(torch.nn.Module):
         if self.use_high_res_features_in_sam:
             # precompute projected level 0 and level 1 features in SAM decoder
             # to avoid running it again on every SAM click
+            # # using the auxilary decoder 
+            if self.use_auxiliary_decoder:
+                backbone_out['backbone_fpn_aux'] = []
+                backbone_out["backbone_fpn_aux"].append(
+                    self.sam_mask_decoder_aux.conv_s0(backbone_out["backbone_fpn"][0])
+                )
+                backbone_out["backbone_fpn_aux"].append(
+                    self.sam_mask_decoder_aux.conv_s1(backbone_out["backbone_fpn"][1])
+                )
+            # # using the main decoder
             backbone_out["backbone_fpn"][0] = self.sam_mask_decoder.conv_s0(
                 backbone_out["backbone_fpn"][0]
             )
@@ -121,15 +151,21 @@ class SAM2Base(torch.nn.Module):
     def _prepare_backbone_features(self, backbone_out):
         """Prepare and flatten visual features."""
         backbone_out = backbone_out.copy()
-        assert len(backbone_out["backbone_fpn"]) == len(backbone_out["vision_pos_enc"])
+        # assert len(backbone_out["backbone_fpn"]) == len(backbone_out["vision_pos_enc"])
         assert len(backbone_out["backbone_fpn"]) >= self.num_feature_levels
 
         feature_maps = backbone_out["backbone_fpn"][-self.num_feature_levels :]
-        vision_pos_embeds = backbone_out["vision_pos_enc"][-self.num_feature_levels :]
+        # vision_pos_embeds = backbone_out["vision_pos_enc"][-self.num_feature_levels :]
 
-        feat_sizes = [(x.shape[-2], x.shape[-1]) for x in vision_pos_embeds]
+        # feat_sizes = [(x.shape[-2], x.shape[-1]) for x in vision_pos_embeds]
         # flatten NxCxHxW to HWxNxC
         vision_feats = [x.flatten(2).permute(2, 0, 1) for x in feature_maps]
-        vision_pos_embeds = [x.flatten(2).permute(2, 0, 1) for x in vision_pos_embeds]
+        # vision_pos_embeds = [x.flatten(2).permute(2, 0, 1) for x in vision_pos_embeds]
 
-        return backbone_out, vision_feats, vision_pos_embeds, feat_sizes
+        # auxiliary decoder
+        if self.use_auxiliary_decoder:
+            feature_maps_aux = backbone_out["backbone_fpn_aux"]
+            vision_feats_aux = [x.flatten(2).permute(2, 0, 1) for x in feature_maps_aux]
+            return vision_feats, vision_feats_aux
+        # return backbone_out, vision_feats, vision_pos_embeds, feat_sizes
+        return vision_feats
