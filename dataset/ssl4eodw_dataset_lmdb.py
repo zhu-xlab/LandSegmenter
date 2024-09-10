@@ -42,9 +42,16 @@ KEY_LBLTYPE = 'label_type'
 MASK_CODE = 255
 
 
-def normalize(img):
-    img = img.astype(np.float32)*10000/255
 
+def revert_uint8_data(img, mean, std):
+    scale = 2
+    min_value = mean - scale * std
+    max_value = mean + scale * std
+    img = min_value + (max_value - min_value) * img / 255
+    return img
+
+
+def normalize(img):
     # get band info
     n_bands = img.shape[0]
     band_ids = BANDS[n_bands]
@@ -52,7 +59,9 @@ def normalize(img):
     # data normalize
     img_new = []
     for b in range(n_bands):
-        img0 = single_band_normalize(img[b], S2C_MEAN[band_ids[b]], S2C_STD[band_ids[b]])
+        img0 = img[b].astype(np.float32)
+        img0 = revert_uint8_data(img0, S2C_MEAN[band_ids[b]], S2C_STD[band_ids[b]])
+        img0 = single_band_normalize(img0, S2C_MEAN[band_ids[b]], S2C_STD[band_ids[b]])
         img_new.append(img0[None])
     
     # concatenate

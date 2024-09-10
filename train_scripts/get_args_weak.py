@@ -92,7 +92,7 @@ def set_log_files(args):
     # coteach settings
     args.gname += f'_rampup_{args.rampup_type}_{args.rampup_length}_fr_{args.init_forget_rate}_to_{args.forget_rate}'
     # # using pretrained decoder or not
-    # args.gname += '_deI' if args.load_de else '_deN'
+    args.gname += '_deI' if args.load_de else ''
         
     # job type
     args.job_type = f'{int(args.wfocal)}F_{int(args.wdice)}D' 
