@@ -17,11 +17,12 @@ from torch.utils.data import DataLoader, random_split, Subset
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
-from train_scripts.get_args import get_args_dwosm as get_args
+from train_scripts.get_args import get_args_dw as get_args
 from sam2.sam2_image_trainer import SAM2ImageTrainer
 
 # dataset
 from dataset.dwosm_dataset_lmdb import DWOSMDataset, SegAugTransforms
+from dataset.ssl4eodw_dataset_lmdb import SSL4EODataset
 import albumentations as A
 
 
@@ -67,7 +68,23 @@ def main():
         dataset = DWOSMDataset(data_path, mode=args.it, n_bands=args.n_channels, 
                                transform=trans)
         return dataset
-    train_dataset = get_dataset(args.train_path, SegAugTransforms(trans_tr))
+    # training set
+    if args.dataset_name == 'DWGT':
+        train_dataset = get_dataset(args.train_path, SegAugTransforms(trans_tr))
+    elif args.dataset_name == 'SSL4EO':
+        lmdb_s2 = os.path.join(args.data_path, args.dns2)
+        lmdb_lb = os.path.join(args.data_path, args.dnwl)
+        train_dataset = SSL4EODataset(lmdb_file_ns=lmdb_lb, 
+                                      # lmdb_file_s1=lmdb_s1, 
+                                      lmdb_file_s2=lmdb_s2,
+                                      mode=args.it,
+                                      n_bands=args.n_channels, 
+                                      season=None,
+                                      transform=SegAugTransforms(trans_tr), 
+                                      )
+    else:
+        raise ValueError(f'Invalid dataset name: {args.dataset_name}')
+    # test set
     test_dataset = get_dataset(args.test_path, SegAugTransforms(trans_ts))
     print(f'Images are loaded with {train_dataset[0]["image"].shape[0]} bands.')
     # dataloader: no matther what devices is used, here directly utilize DataLoader since pl will take of DDP cases

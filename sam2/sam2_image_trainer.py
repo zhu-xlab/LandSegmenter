@@ -65,6 +65,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         # copnstruct sam2-based model (image encoder and prompt encoder weights are automatically fixed)
         self.model = build_sam2(args.config_file, args.ckpt_path, args.ckpt_path_clip, args.load_de)
         # set up the losses: dice and focal
+        self.use_multiclass_loss = args.use_multiclass_loss
         self._get_loss()
 
         # Spatial dim for backbone feature maps
@@ -187,12 +188,6 @@ class SAM2ImageTrainer(pl.LightningModule):
         # prediction
         masks, iou_predictions = self.forward(x, prompt_tokens)
         
-        # prepare labels
-        # if lbl_type==1: # ns labels
-        #     y1 = y.copy()
-        #     y2 = y
-        # else: # gt labels
-        #     y1 = y2 = y
         # calculate losses 
         loss = torch.tensor(0.0, device=self.device)
         # # multi-class loss
@@ -206,6 +201,11 @@ class SAM2ImageTrainer(pl.LightningModule):
                 y_ = (y==c).to(y.dtype)
                 y_[y==MASK_CODE] = MASK_CODE
                 loss_ = w*L(masks[:,c], y_)
+                loss += loss_
+        # multi-class loss
+        if self.use_multiclass_loss:
+            for L, w in zip([self.DLoss, self.FLoss], [self.wdice, self.wfocal]):
+                loss_ = w*L(masks, y)
                 loss += loss_
         self.log('tr_loss_mask', loss, on_epoch=True, on_step=False, sync_dist=True)
         
@@ -370,21 +370,24 @@ class SAM2ImageTrainer(pl.LightningModule):
         # # Cross Entropy
         # self.CELoss = nn.CrossEntropyLoss(ignore_index=MASK_CODE)  
         # Dice
-        # self.DLoss = DiceLoss(mode='multiclass', 
-        #                       from_logits=True, 
-        #                       ignore_index=MASK_CODE)
         self.BDLoss = DiceLoss(mode='binary',
                                from_logits=True,
                                ignore_index=MASK_CODE)
         # Focal loss
-        # self.FLoss = FocalLoss(mode='multiclass',        # by default, alpha=None, gamma=2.0
-        #                        ignore_index=MASK_CODE)
         self.BFLoss = FocalLoss(mode='binary',           
                                 ignore_index=MASK_CODE)
         
         # l1 loss
         self.L1Loss = nn.L1Loss()
 
+        # multi-class loss
+        if self.use_multiclass_loss:
+            self.DLoss = DiceLoss(mode='multiclass', 
+                                  from_logits=True, 
+                                  ignore_index=MASK_CODE)
+            self.FLoss = FocalLoss(mode='multiclass',        # by default, alpha=None, gamma=2.0
+                                   ignore_index=MASK_CODE)
+            
         return
 
 

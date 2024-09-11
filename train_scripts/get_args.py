@@ -7,12 +7,20 @@ import numpy as np
 from pathlib import Path
 
 
-def get_args_dwosm():
+def get_args_dw():
     parser = argparse.ArgumentParser(description='Fine-tune SAM2 with DW data')
     # data settings
-    parser.add_argument('--train_path', type=str, default='E:/Datasets/DFC2020/lmdb/DFC2020_s12_validation.lmdb')
     parser.add_argument('--test_path', type=str, default='E:/Datasets/DFC2020/lmdb/DFC2020_s12_test.lmdb')
     parser.add_argument('--label_type', dest='lbl_t', type=str, default='dw', choices=['dw', 'osm'], help='Type of label')
+    
+    # data settings - DWGT
+    parser.add_argument('--train_path', type=str, default='E:/Datasets/DFC2020/lmdb/DFC2020_s12_validation.lmdb')
+    
+    # data settings - DWNS
+    parser.add_argument('--data_path', type=str, default='E:/Datasets/DFC2020/lmdb/DFC2020_s12_validation.lmdb')
+    parser.add_argument('--data_name_s1', dest='dns1', type=str, default=None)
+    parser.add_argument('--data_name_s2', dest='dns2', type=str, default=None)
+    parser.add_argument('--data_name_weak_label', dest='dnwl', type=str, default=None)
     
     # get common arguments
     parser = get_common_args(parser)
@@ -28,7 +36,10 @@ def get_args_dwosm():
     
     return args
 
+
 def get_common_args(parser):
+    # dataset name
+    parser.add_argument('--dataset_name', type=str, help='Name of the dataset')
     # saving directory
     parser.add_argument('--save_dir', type=str, default='Results_test', help='Directory to save the results')  
     # data settings
@@ -57,6 +68,7 @@ def get_common_args(parser):
     parser.add_argument('--learning_rate', '-l', dest='lr', metavar='LR', type=float, default=0.001, help='Initial learning rate')
     parser.add_argument('--focal_loss_weight', dest='wfocal', type=float, default=10.0, help='Weight of focal loss')
     parser.add_argument('--dice_loss_weight', dest='wdice', type=float, default=1.0, help='Weight of dice loss')
+    parser.add_argument('--use_multiclass_loss', action='store_true', default=False, help='Use multiclass loss or not')
     parser.add_argument('--amp', action='store_false', help='Use mixed precision or not')
     parser.add_argument('--scheduler_type', dest='schdt', type=str, default='none', choices=['none','cos','step','exp'], help='Type of scheduler to use')
     parser.add_argument('--scheduler_values', dest='schdv', type=float, nargs='*', default=[], help='Values of scheduler to use (the epoch indexes for step scheduler; number of iterations for cosine scheduler)')
@@ -77,11 +89,13 @@ def get_common_args(parser):
 def set_log_files(args):
     # group name
     if args.ntr>0: 
-        args.gname = f'test_remoteclip_DW_GT_{args.ntr}'
+        args.gname = f'test_remoteclip_{args.dataset_name}_{args.ntr}'
     else:
-        args.gname = f'test_remoteclip_DW_GT_all'
+        args.gname = f'test_remoteclip_{args.dataset_name}_all'
     # using pretrained decoder or not
     args.gname += '_deI' if args.load_de else '_deN'
+    # using multiclass loss or not
+    args.gname += '_mcloss' if args.use_multiclass_loss else ''
         
     # job type
     args.job_type = f'{int(args.wfocal)}F_{int(args.wdice)}D' 
