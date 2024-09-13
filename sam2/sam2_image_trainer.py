@@ -84,7 +84,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.wfocal = args.wfocal
         self.wdice = args.wdice
         self.wiou_no = args.wiou_no
-        self.wunsure = args.winlbl  # incompletely labeled patches are regarded as unsure, assigning a smaller weight
+        # self.wunsure = args.winlbl  # incompletely labeled patches are regarded as unsure, assigning a smaller weight
         # optimizer
         self.opt = args.opt
         self.lr = args.lr
@@ -217,34 +217,23 @@ class SAM2ImageTrainer(pl.LightningModule):
         
         # existance loss
         loss_exist_matrix = self.BCELoss(exist_predictions, y_exist)
-        # pick the patches without no data
-        if_y_have_no_nan = ((y==MASK_CODE).sum(axis=(1,2))==0)[:,None]
-        if_y_have_no_nan = if_y_have_no_nan.repeat(1, n_classes)
-        # an existing label is regarded as reliable if existance=1 or no nan in the patch with existance=0
-        y_reliable = y_exist + (1-y_exist)*if_y_have_no_nan 
-        print(f'y_reliable,sum:{y_reliable.sum()}, if_y_have_no_nan,sum:{if_y_have_no_nan.sum()}, {if_y_have_no_nan.shape}, {if_y_have_no_nan.numel()}')
+        # calculate the proportion of labeled pixels to serve as the weights
+        y_proportions = ((y!=MASK_CODE).sum(axis=(1,2))/(y.shape[1]*y.shape[2]))[:,None]
+        y_proportions = y_proportions.repeat(1, n_classes)
         # weighted existance loss according to the reliability
-        loss_exist = (y_reliable*loss_exist_matrix).sum() \
-                + self.wunsure*((1-y_reliable)*loss_exist_matrix).sum()
-        loss_exist = loss_exist/loss_exist_matrix.numel()
+        loss_exist = (y_proportions*loss_exist_matrix).sum()/loss_exist_matrix.numel()
         self.log('tr_loss_exist', loss_exist, on_epoch=True, on_step=False, sync_dist=True)
 
         # iou loss
         ious = self._get_ious(masks.detach(), y)
-        y_exist_tmp = (y_exist>0)
         loss_iou_matrix = self.L1Loss(iou_predictions, ious)
         # calculate weighted iou loss
         # weighting strategy: considering 1. the reliability of the existance prediction, 2. the reliability of the iou prediction
-        loss_iou = torch.tensor(0.0, device=self.device)
-        weighted_n = torch.tensor(0.0, device=self.device)
-        for w, y_tmp in zip([1, self.wunsure], [if_y_have_no_nan, ~if_y_have_no_nan]):
-            y_exist_tmp = (y_exist>0) & y_tmp
-            y_noexist_tmp = (y_exist==0) & y_tmp
-            loss_iou_ = (1-self.wiou_no)*loss_iou_matrix[y_exist_tmp].sum() \
-                    + self.wiou_no*loss_iou_matrix[y_noexist_tmp].sum()
-            loss_iou += w*loss_iou_
-            weighted_n += (1-self.wiou_no)*y_exist_tmp.sum() + self.wiou_no*y_noexist_tmp.sum()
-        loss_iou = loss_iou/weighted_n
+        loss_iou = ((y_proportions[y_exist>0] * loss_iou_matrix[y_exist>0]).sum() \
+                + self.wiou_no * (y_proportions[y_exist==0] * loss_iou_matrix[y_exist==0]).sum()\
+                    ) / loss_iou_matrix.numel()
+        
+        # final loss
         loss = loss \
             + loss_iou*n_classes \
             + loss_exist

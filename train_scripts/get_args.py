@@ -69,7 +69,6 @@ def get_common_args(parser):
     parser.add_argument('--focal_loss_weight', dest='wfocal', type=float, default=10.0, help='Weight of focal loss')
     parser.add_argument('--dice_loss_weight', dest='wdice', type=float, default=1.0, help='Weight of dice loss')
     parser.add_argument('--iou_no_object_weight', dest='wiou_no', type=float, default=0.5, help='Weight of iou loss for no object')
-    parser.add_argument('--incomplete_labeled_patch_weight', dest='winlbl', type=float, default=0.25, help='Weight of incomplete labeled patch loss')
     parser.add_argument('--use_multiclass_loss', action='store_true', default=False, help='Use multiclass loss or not')
     parser.add_argument('--amp', action='store_false', help='Use mixed precision or not')
     parser.add_argument('--scheduler_type', dest='schdt', type=str, default='none', choices=['none','cos','step','exp'], help='Type of scheduler to use')
