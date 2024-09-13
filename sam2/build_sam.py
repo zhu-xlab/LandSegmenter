@@ -26,12 +26,12 @@ def build_sam2(
 
     if apply_postprocessing:
         hydra_overrides_extra = hydra_overrides_extra.copy()
-        hydra_overrides_extra += [
-            # dynamically fall back to multi-mask if the single mask is not stable
-            "++model.sam_mask_decoder_extra_args.dynamic_multimask_via_stability=true",
-            "++model.sam_mask_decoder_extra_args.dynamic_multimask_stability_delta=0.05",
-            "++model.sam_mask_decoder_extra_args.dynamic_multimask_stability_thresh=0.98",
-        ]
+        # hydra_overrides_extra += [
+        #     # dynamically fall back to multi-mask if the single mask is not stable
+        #     "++model.sam_mask_decoder_extra_args.dynamic_multimask_via_stability=true",
+        #     "++model.sam_mask_decoder_extra_args.dynamic_multimask_stability_delta=0.05",
+        #     "++model.sam_mask_decoder_extra_args.dynamic_multimask_stability_thresh=0.98",
+        # ]
     # Read config and init model
     cfg = compose(config_name=config_file, overrides=hydra_overrides_extra)
     OmegaConf.resolve(cfg)
@@ -56,7 +56,8 @@ def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights):
                 # print(missing_keys)
                 for mk in missing_keys:
                     if mk.startswith('image_encoder') or mk.startswith("sam_mask_decoder.") or mk.startswith("no_mem_embed"):
-                        raise RuntimeError(f'Unexpected missing key: {mk}')
+                        if not mk.startswith("sam_mask_decoder.existance_prediction_head"):
+                            raise RuntimeError(f'Unexpected missing key: {mk}')
             print("Loaded image encoder and decoder weights from SAM2 checkpoint")
         else:
             sd_new = sd.copy()

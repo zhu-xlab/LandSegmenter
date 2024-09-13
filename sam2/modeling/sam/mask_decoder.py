@@ -88,6 +88,16 @@ class MaskDecoder(nn.Module):
             iou_head_depth,
             sigmoid_output=iou_prediction_use_sigmoid,
         )
+
+        # head to predict whether the current scene contains the target class or not
+        self.existance_prediction_head = MLP(
+            transformer_dim,
+            iou_head_hidden_dim,
+            self.num_mask_tokens,
+            iou_head_depth,
+            sigmoid_output=False,
+        )
+        
         
         # When outputting a single mask, optionally we can dynamically fall back to the best
         # multimask output token if the single mask output token gives low stability scores.
@@ -120,7 +130,7 @@ class MaskDecoder(nn.Module):
           torch.Tensor: batched SAM token for mask output
         """
         # masks, iou_pred, mask_tokens_out, object_score_logits = self.predict_masks(
-        masks, iou_pred, _ = self.predict_masks(
+        masks, iou_pred, exist_pred, _ = self.predict_masks(
             image_embeddings=image_embeddings,
             text_embeddings=text_embeddings,
             repeat_image=repeat_image,
@@ -131,14 +141,17 @@ class MaskDecoder(nn.Module):
         if multimask_output:
             masks = masks[:, 1:, :, :]
             iou_pred = iou_pred[:, 1:]
+            exist_pred = exist_pred[:, 1:]
         elif self.dynamic_multimask_via_stability and not self.training:
+            print('wrong if', self.dynamic_multimask_via_stability, self.training)
             masks, iou_pred = self._dynamic_multimask_via_stability(masks, iou_pred)
-        else:
+        else:   # multimask_output=False
             masks = masks[:, 0:1, :, :]
             iou_pred = iou_pred[:, 0:1]
+            exist_pred = exist_pred[:, 0:1]
 
         # Prepare output
-        return masks, iou_pred, #sam_tokens_out, object_score_logits
+        return masks, iou_pred, exist_pred
 
     def predict_masks(
         self,
@@ -197,8 +210,11 @@ class MaskDecoder(nn.Module):
 
         # Generate mask quality predictions
         iou_pred = self.iou_prediction_head(iou_token_out)
+
+        # Generate class existence predictions
+        exist_pred = self.existance_prediction_head(iou_token_out)
         
-        return masks, iou_pred, mask_tokens_out  # , object_score_logits
+        return masks, iou_pred, exist_pred, mask_tokens_out
 
     def _get_stability_scores(self, mask_logits):
         """

@@ -38,6 +38,7 @@ KEY_LBL = 'label'
 KEY_LBLTYPE = 'label_type'
 MASK_CODE = 255
 INPUT_SIZE = 1024
+TEXT_PREFIX = 'A photo of '
 
 CLS_DICT = {0:'Water', 1:'Trees', 2:'Grass', 3:'Flooded vegetation', 4:'Crops', 5:'Shrub and Scrub', 6:'Built area', 7:'Bare land', 8:'Ice and Snow'}
 
@@ -82,6 +83,8 @@ class SAM2ImageTrainer(pl.LightningModule):
         # loss weights
         self.wfocal = args.wfocal
         self.wdice = args.wdice
+        self.wiou_no = args.wiou_no
+        self.wunsure = args.winlbl  # incompletely labeled patches are regarded as unsure, assigning a smaller weight
         # optimizer
         self.opt = args.opt
         self.lr = args.lr
@@ -111,10 +114,11 @@ class SAM2ImageTrainer(pl.LightningModule):
         high_res_features = [
             feat_level.repeat(n_classes, 1, 1, 1) for feat_level in img_feats["high_res_feats"]
         ]
-        masks, iou_predictions = self._pred_mask_and_iou(
+        masks, iou_predictions, exist_predictions = self._pred_mask_and_iou(
+            self.model.sam_mask_decoder,
             img_feats["image_embed"], text_embeddings, high_res_features, n_classes, batch_size)
         
-        return masks, iou_predictions
+        return masks, iou_predictions, exist_predictions
     
 
     # ------ Optimizer ------ #
@@ -181,20 +185,22 @@ class SAM2ImageTrainer(pl.LightningModule):
         x = batch[KEY_IMG]
         x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode='bilinear', align_corners=False).contiguous()
         y = batch[KEY_LBL]
+        # existance GT
+        y_exist = torch.zeros((y.shape[0], len(CLS_DICT)), device=self.device)
+        for i in range(len(CLS_DICT)):
+            ye_ = (y==i).sum(axis=(1,2))
+            y_exist[:,i] = (ye_>0).to(y_exist.dtype)
+        # prepare prompt
         prompt_tokens, y, n_classes = self._prepare_prompt(CLS_DICT, y)
         # lbl_type = batch[KEY_LBLTYPE]  # indicate the type of labels: 0 - gt, 1 - ns
         # assert lbl_type in [0, 1], 'Please provide correct label type (0 - gt, 1 - ns)!'
         
         # prediction
-        masks, iou_predictions = self.forward(x, prompt_tokens)
+        masks, iou_predictions, exist_predictions = self.forward(x, prompt_tokens)
+        # masks, iou_predictions, exist_predictions = masks.contiguous(), iou_predictions.contiguous(), exist_predictions.contiguous()
         
         # calculate losses 
         loss = torch.tensor(0.0, device=self.device)
-        # # multi-class loss
-        # for L, w in zip([self.DLoss, self.FLoss], [self.wdice, self.wfocal]):
-        #     loss_ = w*L(masks, y)
-        #     loss += loss_
-        # self.log('tr_loss_multic', loss, on_epoch=True, on_step=False, sync_dist=True)
         # binary loss
         for L, w in zip([self.BDLoss, self.BFLoss], [self.wdice, self.wfocal]):
             for c in range(n_classes):  
@@ -209,9 +215,39 @@ class SAM2ImageTrainer(pl.LightningModule):
                 loss += loss_
         self.log('tr_loss_mask', loss, on_epoch=True, on_step=False, sync_dist=True)
         
+        # existance loss
+        loss_exist_matrix = self.BCELoss(exist_predictions, y_exist)
+        # pick the patches without no data
+        if_y_have_no_nan = ((y==MASK_CODE).sum(axis=(1,2))==0)[:,None]
+        if_y_have_no_nan = if_y_have_no_nan.repeat(1, n_classes)
+        # an existing label is regarded as reliable if existance=1 or no nan in the patch with existance=0
+        y_reliable = y_exist + (1-y_exist)*if_y_have_no_nan 
+        print(f'y_reliable,sum:{y_reliable.sum()}, if_y_have_no_nan,sum:{if_y_have_no_nan.sum()}, {if_y_have_no_nan.shape}, {if_y_have_no_nan.numel()}')
+        # weighted existance loss according to the reliability
+        loss_exist = (y_reliable*loss_exist_matrix).sum() \
+                + self.wunsure*((1-y_reliable)*loss_exist_matrix).sum()
+        loss_exist = loss_exist/loss_exist_matrix.numel()
+        self.log('tr_loss_exist', loss_exist, on_epoch=True, on_step=False, sync_dist=True)
+
         # iou loss
         ious = self._get_ious(masks.detach(), y)
-        loss += self.L1Loss(iou_predictions, ious)*n_classes
+        y_exist_tmp = (y_exist>0)
+        loss_iou_matrix = self.L1Loss(iou_predictions, ious)
+        # calculate weighted iou loss
+        # weighting strategy: considering 1. the reliability of the existance prediction, 2. the reliability of the iou prediction
+        loss_iou = torch.tensor(0.0, device=self.device)
+        weighted_n = torch.tensor(0.0, device=self.device)
+        for w, y_tmp in zip([1, self.wunsure], [if_y_have_no_nan, ~if_y_have_no_nan]):
+            y_exist_tmp = (y_exist>0) & y_tmp
+            y_noexist_tmp = (y_exist==0) & y_tmp
+            loss_iou_ = (1-self.wiou_no)*loss_iou_matrix[y_exist_tmp].sum() \
+                    + self.wiou_no*loss_iou_matrix[y_noexist_tmp].sum()
+            loss_iou += w*loss_iou_
+            weighted_n += (1-self.wiou_no)*y_exist_tmp.sum() + self.wiou_no*y_noexist_tmp.sum()
+        loss_iou = loss_iou/weighted_n
+        loss = loss \
+            + loss_iou*n_classes \
+            + loss_exist
         self.log('tr_loss', loss, on_epoch=True, on_step=False, sync_dist=True)
         
         # training image examples  
@@ -222,44 +258,11 @@ class SAM2ImageTrainer(pl.LightningModule):
     
 
     def validation_step(self, batch, batch_idx):
-        # get data
-        x = batch[KEY_IMG]
-        x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode='bilinear', align_corners=False).contiguous()
-        y = batch[KEY_LBL]
-        # prompt = batch[KEY_PROMPT]
-        prompt_tokens, y, n_classes = self._prepare_prompt(CLS_DICT, y, train_mode=False)
-        
-        # prediction
-        masks, iou_predictions = self.forward(x, prompt_tokens)
-        
-        # ious
-        ious = self._get_ious(masks.detach(), y)
-        self.log('val_mious', ious.mean(), on_epoch=True, on_step=False, sync_dist=True)
-        self.log('val_mious_pred', iou_predictions.mean(), on_epoch=True, on_step=False, sync_dist=True)
-        if batch_idx==0 and self.trainer.global_rank==0:
-            for i in range(4):
-                self._log_imgs('val', x[i], masks[i], y[i])
+        self._do_validation(batch, batch_idx, prefix='val')
 
 
     def test_step(self, batch, batch_idx):
-        # get data
-        x = batch[KEY_IMG]
-        x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode='bilinear', align_corners=False).contiguous()
-        y = batch[KEY_LBL]
-        # prompt = batch[KEY_PROMPT]
-        prompt_tokens, y, n_classes = self._prepare_prompt(CLS_DICT, y, train_mode=False)
-        
-        # prediction
-        masks, iou_predictions = self.forward(x, prompt_tokens)
-
-        # ious
-        ious = self._get_ious(masks.detach(), y)
-        print('ious:', ious)
-        print('ious mean:', ious.mean())
-        self.log('test_mious', ious.mean(), on_epoch=True, on_step=False, sync_dist=True)
-        self.log('test_mious_pred', iou_predictions.mean(), on_epoch=True, on_step=False, sync_dist=True)
-        if batch_idx==0 and self.trainer.global_rank==0:
-            self._log_imgs('test', x[0], masks[0], y[0])
+        self._do_validation(batch, batch_idx, prefix='test')
 
 
     # ------ Model utilities ------ #
@@ -305,7 +308,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         if train_mode:
             n_prompt = random.choice(self.n_prompts)
             if n_prompt == nc_total:
-                texts = [class_name_dict[i] for i in range(nc_total)]
+                texts = [TEXT_PREFIX+class_name_dict[i] for i in range(nc_total)]
                 gt = lbl
             else:
                 lbl_classes = torch.unique(lbl).tolist()
@@ -314,14 +317,14 @@ class SAM2ImageTrainer(pl.LightningModule):
                     prompt_inds_empty = [i for i in range(nc_total) if i not in lbl_classes]
                     lbl_classes += random.sample(prompt_inds_empty, n_prompt-len(lbl_classes))
                 prompt_inds = random.sample(lbl_classes, n_prompt)
-                texts = [class_name_dict[i] for i in prompt_inds]
+                texts = [TEXT_PREFIX+class_name_dict[i] for i in prompt_inds]
                 # prepare labels
                 gt = torch.full_like(lbl, MASK_CODE)
                 for i, ind in enumerate(prompt_inds):
                     gt[lbl==ind] = i    
         else:    # validation and test modes taking all the class names
             n_prompt = nc_total
-            texts = [class_name_dict[i] for i in range(nc_total)]
+            texts = [TEXT_PREFIX+class_name_dict[i] for i in range(nc_total)]
             gt = lbl
 
         # Tokenization of string inputs for the model
@@ -345,8 +348,8 @@ class SAM2ImageTrainer(pl.LightningModule):
         return result, gt, n_prompt
 
 
-    def _pred_mask_and_iou(self, img_embeddings, text_embeddings, high_res_features, n_classes, batch_size):
-        masks, iou_predictions = self.model.sam_mask_decoder(
+    def _pred_mask_and_iou(self, decoder, img_embeddings, text_embeddings, high_res_features, n_classes, batch_size):
+        masks, iou_predictions, exist_predictions = decoder(
             image_embeddings=img_embeddings.repeat(n_classes, 1, 1, 1),
             multimask_output=self.multimask_output,
             text_embeddings=text_embeddings.unsqueeze(1),
@@ -363,12 +366,17 @@ class SAM2ImageTrainer(pl.LightningModule):
                                     '(n_classes batch_size) -> batch_size n_classes',
                                     batch_size=batch_size,
                                     n_classes=n_classes)
-        return masks, iou_predictions
+        exist_predictions = torch.clamp(exist_predictions, -32.0, 32.0)
+        exist_predictions = rearrange(torch.squeeze(exist_predictions, dim=1),
+                                      '(n_classes batch_size) -> batch_size n_classes',
+                                      batch_size=batch_size,
+                                      n_classes=n_classes)
+        return masks, iou_predictions, exist_predictions
     
     
     def _get_loss(self):
-        # # Cross Entropy
-        # self.CELoss = nn.CrossEntropyLoss(ignore_index=MASK_CODE)  
+        # Cross Entropy
+        self.BCELoss = nn.BCEWithLogitsLoss(reduction='none')  
         # Dice
         self.BDLoss = DiceLoss(mode='binary',
                                from_logits=True,
@@ -378,7 +386,7 @@ class SAM2ImageTrainer(pl.LightningModule):
                                 ignore_index=MASK_CODE)
         
         # l1 loss
-        self.L1Loss = nn.L1Loss()
+        self.L1Loss = nn.L1Loss(reduction='none')
 
         # multi-class loss
         if self.use_multiclass_loss:
@@ -395,12 +403,23 @@ class SAM2ImageTrainer(pl.LightningModule):
         ious = []
         for c in range(masks.shape[1]):
             p = (masks[:,c]>=0.5).to(masks.dtype)
+            p[p==MASK_CODE] = 0
             y_ = (y==c).to(masks.dtype)
             tp = (p*y_).sum(axis=(1,2))
             iou = (tp+eps)/(p.sum(axis=(1,2))+y_.sum(axis=(1,2))-tp+eps)
             ious.append(iou)
         ious = torch.stack(ious, dim=1)
         return ious
+    
+
+    def _get_exist_accuracy(self, exist_pred, y):
+        y_exist = torch.zeros((y.shape[0], len(CLS_DICT)), device=self.device)
+        for i in range(len(CLS_DICT)):
+            ye_ = (y==i).sum(axis=(1,2))
+            y_exist[:,i] = (ye_>0).to(y_exist.dtype)
+        exist_pred = (exist_pred>0).to(y_exist.dtype)
+        acc = (exist_pred==y_exist).sum()/y_exist.numel()
+        return acc, y_exist.to(torch.bool)
     
 
     def _log_imgs(self, prefix, x, mask, y):
@@ -428,6 +447,27 @@ class SAM2ImageTrainer(pl.LightningModule):
         wandb.log({f'{prefix}_masks': mask_img})
 
 
-    
+    def _do_validation(self, batch, batch_idx, prefix):
+        # get data
+        x = batch[KEY_IMG]
+        x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode='bilinear', align_corners=False).contiguous()
+        y = batch[KEY_LBL]
+        # prompt = batch[KEY_PROMPT]
+        prompt_tokens, y, n_classes = self._prepare_prompt(CLS_DICT, y, train_mode=False)
+
+        # prediction
+        masks, iou_predictions, existance_predictions = self.forward(x, prompt_tokens)
+        
+        # ious
+        ious = self._get_ious(masks.detach(), y)
+        exist_acc, y_exist = self._get_exist_accuracy(existance_predictions.detach(), y)
+        self.log(f'{prefix}_mious_exist', ious[y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
+        self.log(f'{prefix}_mious_noexist', ious[~y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
+        self.log(f'{prefix}_mious_pred_exist', iou_predictions[y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
+        self.log(f'{prefix}_mious_pred_noexist', iou_predictions[~y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
+        self.log(f'{prefix}_exist_acc', exist_acc, on_epoch=True, on_step=False, sync_dist=True)
+        if batch_idx==0 and self.trainer.global_rank==0:
+            for i in range(4):
+                self._log_imgs(prefix, x[i], masks[i], y[i])
 
 
