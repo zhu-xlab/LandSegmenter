@@ -220,8 +220,9 @@ class SAM2ImageTrainer(pl.LightningModule):
         # calculate the proportion of labeled pixels to serve as the weights
         y_proportions = ((y!=MASK_CODE).sum(axis=(1,2))/(y.shape[1]*y.shape[2]))[:,None]
         y_proportions = y_proportions.repeat(1, n_classes)
+        w_exist = torch.max(y_proportions, y_exist)
         # weighted existance loss according to the reliability
-        loss_exist = (y_proportions*loss_exist_matrix).sum()/loss_exist_matrix.numel()
+        loss_exist = (w_exist*loss_exist_matrix).sum()/loss_exist_matrix.numel()
         self.log('tr_loss_exist', loss_exist, on_epoch=True, on_step=False, sync_dist=True)
 
         # iou loss
