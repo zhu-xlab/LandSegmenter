@@ -381,62 +381,6 @@ class Hiera(nn.Module):
                 feats = x.permute(0, 3, 1, 2)
                 outputs.append(feats)
 
-        # self.block1 = []
-        # self.block2 = []
-        # self.block3 = []
-        # self.block4 = []
-        # outputs = []
-
-        # for i, blk in enumerate(self.blocks):
-        #     if i < 3:
-        #         self.block1.append(blk)  # 第一个块包含前3个元素
-        #     elif 2 < i < 9:
-        #         self.block2.append(blk)  # 第二个块包含接下来的6个元素
-        #     elif 8 < i < 45:
-        #         self.block3.append(blk)  # 第三个块包含接下来的36个元素
-        #     elif 44 < i:
-        #         self.block4.append(blk)  # 其余元素组成第四个块
-
-        # if '1' in self.tuning_stage:
-        #     prompt1 = self.prompt_generator.init_prompt(x, handcrafted1, 1)
-        # for i, blk in enumerate(self.block1):
-        #     if '1' in self.tuning_stage:
-        #         x = self.prompt_generator.get_prompt(x, prompt1, 1, i)
-        #     x = blk(x)
-        #     if i == 1:
-        #         feat = x.permute(0, 3, 1, 2)
-        #         outputs.append(feat)
-
-        # if '2' in self.tuning_stage:
-        #     prompt2 = self.prompt_generator.init_prompt(x, handcrafted2, 2)
-        # for i, blk in enumerate(self.block2):
-        #     if '2' in self.tuning_stage:
-        #         x = self.prompt_generator.get_prompt(x, prompt2, 2, i)
-        #     x = blk(x)
-        #     if i == 4:
-        #         feat = x.permute(0, 3, 1, 2)
-        #         outputs.append(feat)
-
-        # if '3' in self.tuning_stage:
-        #     prompt3 = self.prompt_generator.init_prompt(x, handcrafted3, 3)
-        # for i, blk in enumerate(self.block3):
-        #     if '3' in self.tuning_stage:
-        #         x = self.prompt_generator.get_prompt(x,prompt3, 3, i)
-        #     x = blk(x)
-        #     if i == 34:
-        #         feat = x.permute(0, 3, 1, 2)
-        #         outputs.append(feat)
-
-        # if '4' in self.tuning_stage:
-        #     prompt4 = self.prompt_generator.init_prompt(x, handcrafted4, 4)
-        # for i, blk in enumerate(self.block4):
-        #     if '4' in self.tuning_stage:
-        #         x = self.prompt_generator.get_prompt(x, prompt4, 4, i)
-        #     x = blk(x)
-        #     if i == 2:
-        #         feat = x.permute(0, 3, 1, 2)
-        #         outputs.append(feat)
-
         return outputs
 
     def forward(self, x: torch.Tensor, wave_list: List[float] = None) -> List[torch.Tensor]:

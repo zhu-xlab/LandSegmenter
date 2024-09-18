@@ -171,7 +171,6 @@ class PromptGenerator(nn.Module):
             self.prompt = nn.Parameter(torch.zeros(3, img_size, img_size), requires_grad=False)
 
         if self.handcrafted_tune:
-            # self.handcrafted_generators = nn.ModuleList()
             for i in range(len(self.stages)):
                 if str(i+1) in self.tuning_stage:
                     if i==0:
@@ -184,50 +183,18 @@ class PromptGenerator(nn.Module):
                                                 in_chans=embed_dims[i-1]//scale_factor,
                                                 embed_dim=embed_dims[i]//scale_factor)
                     setattr(self, f'handcrafted_generator_{i+1}', handcrafted_generator)
-                # self.handcrafted_generators.append(handcrafted_generator)
-            # if '1' in self.tuning_stage:
-            #     self.handcrafted_generator1 = OverlapPatchEmbed(img_size=img_size, patch_size=7, stride=4, in_chans=3,
-            #                                             embed_dim=self.embed_dims[0] // self.scale_factor)
-            # if '2' in self.tuning_stage:
-            #     self.handcrafted_generator2 = OverlapPatchEmbed(img_size=img_size // 4, patch_size=3, stride=2,
-            #                                            in_chans=self.embed_dims[0] // self.scale_factor,
-            #                                            embed_dim=self.embed_dims[1] // self.scale_factor)
-            # if '3' in self.tuning_stage:
-            #     self.handcrafted_generator3 = OverlapPatchEmbed(img_size=img_size // 8, patch_size=3, stride=2,
-            #                                            in_chans=self.embed_dims[1] // self.scale_factor,
-            #                                            embed_dim=self.embed_dims[2] // self.scale_factor)
-            # if '4' in self.tuning_stage:
-            #     self.handcrafted_generator4 = OverlapPatchEmbed(img_size=img_size // 16, patch_size=3, stride=2,
-            #                                            in_chans=self.embed_dims[2] // self.scale_factor,
-            #                                            embed_dim=self.embed_dims[3] // self.scale_factor)
-
+          
         if self.embedding_tune:
-            # self.embedding_generators = {}
             for i in range(len(self.stages)):
-                # s = str(i+1)
                 embedding_generator = nn.Linear(self.embed_dims[i], self.embed_dims[i] // self.scale_factor)
                 setattr(self, f'embedding_generator_{i+1}', embedding_generator)
-                # self.embedding_generators[s] = embedding_generator
-            # if '1' in self.tuning_stage:
-            #     self.embedding_generator1 = nn.Linear(self.embed_dims[0], self.embed_dims[0] // self.scale_factor)
-            # if '2' in self.tuning_stage:
-            #     self.embedding_generator2 = nn.Linear(self.embed_dims[1], self.embed_dims[1] // self.scale_factor)
-            # if '3' in self.tuning_stage:
-            #     self.embedding_generator3 = nn.Linear(self.embed_dims[2], self.embed_dims[2] // self.scale_factor)
-            # if '4' in self.tuning_stage:
-            #     self.embedding_generator4 = nn.Linear(self.embed_dims[3], self.embed_dims[3] // self.scale_factor)
-
+               
         if self.spectralfeat_tune:
-            # self.spectralfeat_generators = {}
             for i in range(len(self.stages)):
-                # s = str(i+1)
-                # dofa-large dim = 1024
                 spectralfeat_generator = nn.Linear(1024, self.embed_dims[i] // self.scale_factor)
-                # self.embedding_generators[s] = spectralfeat_generator
                 setattr(self, f'spectralfeat_generator_{i+1}', spectralfeat_generator)
 
         if self.adaptor == 'adaptor':
-            # self.lightweight_mlps, self.shared_mlps = {}, {}
             for i in range(len(self.stages)):
                 if str(i+1) in self.tuning_stage:
                     # downsampling is done at the first layer of each stage
@@ -239,117 +206,28 @@ class PromptGenerator(nn.Module):
                             nn.Linear(self.embed_dims[i] // self.scale_factor, self.embed_dims[i] // self.scale_factor),
                             nn.GELU(),
                             )
-                        # self.lightweight_mlps[s+'_'+str(j)] = lightweight_mlp
                         setattr(self, f'lightweight_mlp_{i+1}_{j}', lightweight_mlp)
                     shared_mlp = nn.Linear(self.embed_dims[i] // self.scale_factor, self.embed_dims[i])
-                    # self.shared_mlps[s] = shared_mlp
                     setattr(self, f'shared_mlp_{i+1}', shared_mlp)
-            # if '1' in self.tuning_stage:
-            #     for i in range(self.depths[0]+1):
-            #         lightweight_mlp = nn.Sequential(
-            #                 nn.Linear(self.embed_dims[0] // self.scale_factor, self.embed_dims[0] // self.scale_factor),
-            #                 nn.GELU(),
-            #             )
-            #         setattr(self, 'lightweight_mlp1_{}'.format(str(i)), lightweight_mlp)
-            #     self.shared_mlp1 = nn.Linear(self.embed_dims[0] // self.scale_factor, self.embed_dims[0])
-
-            # if '2' in self.tuning_stage:
-            #     for i in range(self.depths[1]+1):
-            #         lightweight_mlp = nn.Sequential(
-            #                 nn.Linear(self.embed_dims[1] // self.scale_factor, self.embed_dims[1] // self.scale_factor),
-            #                 nn.GELU(),
-            #             )
-            #         setattr(self, 'lightweight_mlp2_{}'.format(str(i)), lightweight_mlp)
-            #     self.shared_mlp2 = nn.Linear(self.embed_dims[1] // self.scale_factor, self.embed_dims[1])
-
-            # if '3' in self.tuning_stage:
-            #     for i in range(self.depths[2]+1):
-            #         lightweight_mlp = nn.Sequential(
-            #                 nn.Linear(self.embed_dims[2] // self.scale_factor, self.embed_dims[2] // self.scale_factor),
-            #                 nn.GELU(),
-            #             )
-            #         setattr(self, 'lightweight_mlp3_{}'.format(str(i)), lightweight_mlp)
-            #     self.shared_mlp3 = nn.Linear(self.embed_dims[2] // self.scale_factor, self.embed_dims[2])
-
-            # if '4' in self.tuning_stage:
-            #     for i in range(self.depths[3]+1):
-            #         lightweight_mlp = nn.Sequential(
-            #                 nn.Linear(self.embed_dims[3] // self.scale_factor, self.embed_dims[3] // self.scale_factor),
-            #                 nn.GELU(),
-            #             )
-            #         setattr(self, 'lightweight_mlp4_{}'.format(str(i)), lightweight_mlp)
-            #     self.shared_mlp4 = nn.Linear(self.embed_dims[3] // self.scale_factor, self.embed_dims[3])
-
+            
         elif self.adaptor == 'fully_shared':
-            # self.fully_shared_mlps = {}
             for i in range(len(self.stages)):
                 fully_shared_mlp = nn.Sequential(
                     nn.Linear(self.embed_dims[i] // self.scale_factor, self.embed_dims[i] // self.scale_factor),
                     nn.GELU(),
                     nn.Linear(self.embed_dims[i] // self.scale_factor, self.embed_dims[i])  
                     )
-                # self.fully_shared_mlps[str(i+1)] = fully_shared_mlp
                 setattr(self, f'fully_shared_mlp_{i+1}', fully_shared_mlp)
-            # self.fully_shared_mlp1 = nn.Sequential(
-            #             nn.Linear(self.embed_dims[0] // self.scale_factor, self.embed_dims[0] // self.scale_factor),
-            #             nn.GELU(),
-            #             nn.Linear(self.embed_dims[0] // self.scale_factor, self.embed_dims[0])
-            #         )
-            # self.fully_shared_mlp2 = nn.Sequential(
-            #             nn.Linear(self.embed_dims[1] // self.scale_factor, self.embed_dims[1] // self.scale_factor),
-            #             nn.GELU(),
-            #             nn.Linear(self.embed_dims[1] // self.scale_factor, self.embed_dims[1])
-            #         )
-            # self.fully_shared_mlp3 = nn.Sequential(
-            #             nn.Linear(self.embed_dims[2] // self.scale_factor, self.embed_dims[2] // self.scale_factor),
-            #             nn.GELU(),
-            #             nn.Linear(self.embed_dims[2] // self.scale_factor, self.embed_dims[2])
-            #         )
-            # self.fully_shared_mlp4 = nn.Sequential(
-            #             nn.Linear(self.embed_dims[3] // self.scale_factor, self.embed_dims[3] // self.scale_factor),
-            #             nn.GELU(),
-            #             nn.Linear(self.embed_dims[3] // self.scale_factor, self.embed_dims[3])
-            #         )
 
         elif self.adaptor == 'fully_unshared':
-            # self.fully_unshared_mlps = {}
             for i in range(len(self.stages)):
                 fully_unshared_mlp = nn.Sequential(
                     nn.Linear(self.embed_dims[i] // self.scale_factor, self.embed_dims[i] // self.scale_factor),
                     nn.GELU(),
                     nn.Linear(self.embed_dims[i] // self.scale_factor, self.embed_dims[i])
                     )
-                # self.fully_unshared_mlps[str(i+1)] = fully_unshared_mlp
                 setattr(self, f'fully_unshared_mlp_{i+1}', fully_unshared_mlp)
-            # for i in range(self.stages[0]):
-            #     fully_unshared_mlp1 = nn.Sequential(
-            #         nn.Linear(self.embed_dims[0] // self.scale_factor, self.embed_dims[0] // self.scale_factor),
-            #         nn.GELU(),
-            #         nn.Linear(self.embed_dims[0] // self.scale_factor, self.embed_dims[0])
-            #     )
-            #     setattr(self, 'fully_unshared_mlp1_{}'.format(str(i)), fully_unshared_mlp1)
-            # for i in range(self.stages[1]):
-            #     fully_unshared_mlp1 = nn.Sequential(
-            #         nn.Linear(self.embed_dims[1] // self.scale_factor, self.embed_dims[1] // self.scale_factor),
-            #         nn.GELU(),
-            #         nn.Linear(self.embed_dims[1] // self.scale_factor, self.embed_dims[1])
-            #     )
-            #     setattr(self, 'fully_unshared_mlp2_{}'.format(str(i)), fully_unshared_mlp1)
-            # for i in range(self.stages[2]):
-            #     fully_unshared_mlp1 = nn.Sequential(
-            #         nn.Linear(self.embed_dims[2] // self.scale_factor, self.embed_dims[2] // self.scale_factor),
-            #         nn.GELU(),
-            #         nn.Linear(self.embed_dims[2] // self.scale_factor, self.embed_dims[2])
-            #     )
-            #     setattr(self, 'fully_unshared_mlp3_{}'.format(str(i)), fully_unshared_mlp1)
-            # for i in range(self.stages[3]):
-            #     fully_unshared_mlp1 = nn.Sequential(
-            #         nn.Linear(self.embed_dims[3] // self.scale_factor, self.embed_dims[3] // self.scale_factor),
-            #         nn.GELU(),
-            #         nn.Linear(self.embed_dims[3] // self.scale_factor, self.embed_dims[3])
-            #     )
-            #     setattr(self, 'fully_unshared_mlp4_{}'.format(str(i)), fully_unshared_mlp1)
-
+            
         self.apply(self._init_weights)
 
         if self.spectralfeat_tune:
@@ -427,25 +305,7 @@ class PromptGenerator(nn.Module):
                     else:
                         x, H, W = handcrafted_generator(x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous())
                     handcrafteds[str(i+1)] = x
-        # if '1' in self.tuning_stage:
-        #     handcrafted1, H1, W1 = self.handcrafted_generator1(x)
-        # else:
-        #     handcrafted1 = None
 
-        # if '2' in self.tuning_stage:
-        #     handcrafted2, H2, W2 = self.handcrafted_generator2(handcrafted1.reshape(B, H1, W1, -1).permute(0, 3, 1, 2).contiguous())
-        # else:
-        #     handcrafted2 = None
-
-        # if '3' in self.tuning_stage:
-        #     handcrafted3, H3, W3 = self.handcrafted_generator3(handcrafted2.reshape(B, H2, W2, -1).permute(0, 3, 1, 2).contiguous())
-        # else:
-        #     handcrafted3 = None
-
-        # if '4' in self.tuning_stage:
-        #     handcrafted4, H4, W4 = self.handcrafted_generator4(handcrafted3.reshape(B, H3, W3, -1).permute(0, 3, 1, 2).contiguous())
-        # else:
-        #     handcrafted4 = None
         return handcrafteds
     
     def init_spectral_feature(self, x, wave_list=None):
@@ -508,26 +368,6 @@ class PromptGenerator(nn.Module):
         else:
             return handcrafted_feature, embedding_feature
 
-    # def get_embedding_feature(self, x, block_num):
-    #     if self.embedding_tune:
-    #         embedding_generator = self.embedding_generators[str(block_num)]
-    #         # embedding_generator = getattr(self, 'embedding_generator{}'.format(str(block_num)))
-    #         embedding_feature = embedding_generator(x)
-
-    #         return embedding_feature
-    #     else:
-    #         return None
-
-    # def get_handcrafted_feature(self, x, block_num):
-    #     if self.handcrafted_tune:
-    #         handcrafted_generator = self.handcrafted_generators[str(block_num)]
-    #         # handcrafted_generator = getattr(self, 'handcrafted_generator{}'.format(str(block_num)))
-    #         handcrafted_feature = handcrafted_generator(x)
-
-    #         return handcrafted_feature
-    #     else:
-    #         return None
-
     def get_prompt(self, x, prompt, block_num, depth_num):
         feat = 0
         B, H, W =  prompt[1].shape[0],  prompt[1].shape[1],  prompt[1].shape[2]
@@ -539,8 +379,6 @@ class PromptGenerator(nn.Module):
             feat += prompt[2]
 
         if self.adaptor == 'adaptor':
-            # lightweight_mlp = self.lightweight_mlps[str(block_num) + '_' + str(depth_num)]
-            # shared_mlp = self.shared_mlps[str(block_num)]
             lightweight_mlp = getattr(self, f'lightweight_mlp_{block_num}_{depth_num}')
             shared_mlp = getattr(self, f'shared_mlp_{block_num}')
 
@@ -548,12 +386,10 @@ class PromptGenerator(nn.Module):
             feat = shared_mlp(feat)
 
         elif self.adaptor == 'fully_shared':
-            # fully_shared_mlp = self.fully_shared_mlps[str(block_num)]
             fully_shared_mlp = getattr(self, f'fully_shared_mlp_{block_num}')
             feat = fully_shared_mlp(feat)
 
         elif self.adaptor == 'fully_unshared':
-            # fully_unshared_mlp = self.fully_unshared_mlps[str(block_num) + '_' + str(depth_num)]
             fully_unshared_mlp = getattr(self, f'fully_unshared_mlp_{block_num}_{depth_num}')
             feat = fully_unshared_mlp(feat)
 
