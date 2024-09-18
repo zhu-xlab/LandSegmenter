@@ -140,11 +140,12 @@ class PromptGenerator(nn.Module):
                  freq_nums, 
                  adaptor, 
                  img_size,
-                 use_statistical_feats=True,  # whether to use statistical features (max, mean, min)
-                 handcrafted_tune=True,       # whether to tune handcrafted features
-                 embedding_tune=True,         # whether to tune embedding features
-                 spectralfeat_tune=True,      # whether to use and tune spectral features
-                 dofa_ckpt_path=None,         # path to load DOFA checkpoint
+                 use_statistical_feats=True,   # whether to use statistical features (max, mean, min)
+                 handcrafted_tune=True,        # whether to tune handcrafted features
+                 embedding_tune=True,          # whether to tune embedding features
+                 spectralfeat_tune=True,       # whether to use and tune spectral features
+                 dofa_name='vit_base_patch16', # name of DOFA model  (vit_base_patch16, vit_large_patch16)
+                 dofa_ckpt_path=None,          # path to load DOFA checkpoint
                  ):
         """
         Args:
@@ -190,8 +191,16 @@ class PromptGenerator(nn.Module):
                 setattr(self, f'embedding_generator_{i+1}', embedding_generator)
                
         if self.spectralfeat_tune:
+            # build dofa
+            assert os.path.exists(dofa_ckpt_path), f"DOFA checkpoint path {dofa_ckpt_path} does not exist!"
+            self.dofa_patch_size = 16
+            self.dofa_name = dofa_name
+            self.dofa_out_indices = [1,4,9,11] if 'base' in dofa_name else [3,9,19,23]
+            # self.dofa_out_indices = [2,5,8,11]  # [0,3,21,23] (old for large); [2,5,8,11] for base
+            self.dofa = self._build_spectral_encoder()
+            # build spectral feature generators
             for i in range(len(self.stages)):
-                spectralfeat_generator = nn.Linear(1024, self.embed_dims[i] // self.scale_factor)
+                spectralfeat_generator = nn.Linear(self.dofa.embed_dim, self.embed_dims[i] // self.scale_factor)
                 setattr(self, f'spectralfeat_generator_{i+1}', spectralfeat_generator)
 
         if self.adaptor == 'adaptor':
@@ -231,43 +240,42 @@ class PromptGenerator(nn.Module):
         self.apply(self._init_weights)
 
         if self.spectralfeat_tune:
-            assert os.path.exists(dofa_ckpt_path), f"DOFA checkpoint path {dofa_ckpt_path} does not exist!"
-            self.dofa_patch_size = 16
-            self.dofa = self.build_spectral_encoder(dofa_ckpt_path)
+            self._load_spectral_encoder_checkpoint(dofa_ckpt_path)
 
 
     def _init_weights(self, m):
-        if m.requires_grad_:
-            if isinstance(m, nn.Linear):
-                trunc_normal_(m.weight, std=.02)
-                if isinstance(m, nn.Linear) and m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.LayerNorm):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
-                nn.init.constant_(m.weight, 1.0)
-            elif isinstance(m, nn.Conv2d):
-                fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-                fan_out //= m.groups
-                m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
-                if m.bias is not None:
-                    m.bias.data.zero_()
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+        elif isinstance(m, nn.Conv2d):
+            fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+            fan_out //= m.groups
+            m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
+            if m.bias is not None:
+                m.bias.data.zero_()
     
-    def build_spectral_encoder(self, dofa_ckpt_path):
-        model = dofa.__dict__['vit_large_patch16'](img_size=224, 
-                                                   patch_size=self.dofa_patch_size, 
-                                                   num_classes=-1,
-                                                   global_pool=False
-                                                   )
+    def _build_spectral_encoder(self):
+        model = dofa.__dict__[self.dofa_name](img_size=224, 
+                                              patch_size=self.dofa_patch_size, 
+                                              num_classes=-1,
+                                              global_pool=False
+                                              )
         # remove other head layers
         model.norm = torch.nn.Identity()
+        return model
+    
+    def _load_spectral_encoder_checkpoint(self, dofa_ckpt_path):
         checkpoint = torch.load(dofa_ckpt_path, map_location=torch.device('cpu'))
-        missing_keys, _ = model.load_state_dict(checkpoint, strict=False)
+        missing_keys, _ = self.dofa.load_state_dict(checkpoint, strict=False)
         if missing_keys:
             raise ValueError(f"Missing keys in loading DOFA: {missing_keys}")
         # fix dofa weights
-        for param in model.parameters():
+        for param in self.dofa.parameters():
             param.requires_grad = False
-        return model
 
     def init_handcrafted(self, x):
         if not self.use_statistical_feats:
@@ -309,70 +317,81 @@ class PromptGenerator(nn.Module):
         return handcrafteds
     
     def init_spectral_feature(self, x, wave_list=None):
-        # Dictionary to store outputs from specific layers
-        outputs = {}
+        with torch.no_grad():    
+            # Dictionary to store outputs from specific layers
+            outputs = {}
 
-        # Define hook function to capture the output of a layer
-        def get_hook(name):
-            def hook(model, input, output):
-                outputs[name] = output
-            return hook
+            # Define hook function to capture the output of a layer
+            def get_hook(name):
+                def hook(model, input, output):
+                    outputs[name] = output
+                return hook
 
-        # Register hooks for the 1th, 4th, 22th, and 24th layers for vit-large
-        out_indices = [0,3,21,23]
-        for oi in out_indices:
-            self.dofa.blocks[oi].register_forward_hook(get_hook(f'block_{oi}'))
-        
-        # forward pass
-        _ = self.dofa(x, wave_list=wave_list)
+            # Register hooks for the 1th, 4th, 22th, and 24th layers for vit-large
+            for oi in self.dofa_out_indices:
+                self.dofa.blocks[oi].register_forward_hook(get_hook(f'block_{oi}'))
+            
+            # forward pass
+            _ = self.dofa(x, wave_list=wave_list)
 
-        # rearrange outputs
-        outputs = self._rearrange_dofa_middle_features(outputs, out_indices)
+            new_outs = {}
+            for i in range(len(self.stages)):
+                if str(i+1) in self.tuning_stage:
+                    out_ = outputs[f'block_{self.dofa_out_indices[i]}'].detach()[:,1:,:]  # remove cls token
+                    new_outs[str(i+1)] = rearrange(out_, "b (h w) c -> b h w c", h=224//self.dofa_patch_size)
+            # del outputs
+            torch.cuda.empty_cache()
 
-        # reproject to embedding dimensions
-        new_outs = {}
-        for k in outputs.keys():
-            if k in self.tuning_stage:
-                spectralfeat_generator = getattr(self, f'spectralfeat_generator_{k}') # self.spectralfeat_generators[k]
-                new_outs[k] = spectralfeat_generator(outputs[k])
+            # # rearrange outputs
+            # new_outs = self._rearrange_dofa_middle_features(new_outs)            
+
+            # # reproject to embedding dimensions
+            # for k in new_outs.keys():
+            #     # if k in self.tuning_stage:
+            #     spectralfeat_generator = getattr(self, f'spectralfeat_generator_{k}') # self.spectralfeat_generators[k]
+            #     new_outs[k] = spectralfeat_generator(new_outs[k])
 
         return new_outs
 
-    def _rearrange_dofa_middle_features(self, outputs, out_indices):
-        resize_scale_factors = [256, 128, 64, 32]
-        new_outs = {}
-        for i, (oi, rsc) in enumerate(zip(out_indices, resize_scale_factors)):
-            out_ = outputs[f'block_{oi}'][:,1:,:]
-            out_ = rearrange(out_, "b (h w) c -> b c h w", h=224//self.dofa_patch_size)
-            out_ = F.interpolate(out_.contiguous(), scale_factor=rsc, mode='bilinear', align_corners=False)  # contiguous(): to avoid RuntimeError: upsample_bilinear2d_nhwc only supports output tensors with less than INT_MAX elements
-            new_outs[str(i+1)] = out_.permute(0, 2, 3, 1)  # B, H, W, C
-            # print(k, rsc, out_.shape)
-        return new_outs
+    # def _rearrange_dofa_middle_features(self, outputs):
+    #     resize_scale_factors = [256, 128, 64, 32]
+    #     for k in outputs.keys():
+    #         out_ = outputs[k] # .detach()[:,1:,:]
+    #         out_ = rearrange(out_, "b (h w) c -> b c h w", h=224//self.dofa_patch_size)
+    #         out_ = F.interpolate(out_, scale_factor=resize_scale_factors[int(k)-1], 
+    #                              mode='bilinear', align_corners=False)  # contiguous(): to avoid RuntimeError: upsample_bilinear2d_nhwc only supports output tensors with less than INT_MAX elements
+    #         outputs[k] = out_.permute(0, 2, 3, 1)  # B, H, W, C
+    #         del out_
+    #         # print(k, rsc, out_.shape)
+    #     return outputs
 
     def init_prompt(self, embedding_feature, handcrafted_feature, block_num,
                     spectral_feature=None):
+        B, H, W =  embedding_feature.shape[:3]
         if self.embedding_tune:
             # embedding_generator = self.embedding_generators[str(block_num)]
             embedding_generator = getattr(self, f'embedding_generator_{block_num}')
             embedding_feature = embedding_generator(embedding_feature)
     
         if self.handcrafted_tune:
-            handcrafted_feature = handcrafted_feature
+            handcrafted_feature = handcrafted_feature.reshape(B, H, W, -1)
     
         if self.spectralfeat_tune:
             assert spectral_feature is not None, "Spectral feature is None while spectralfeat_tune=True!"
             # spectralfeat_generator = self.spectralfeat_generators[str(block_num)]
             spectralfeat_generator = getattr(self, f'spectralfeat_generator_{block_num}')
             spectral_feature = spectralfeat_generator(spectral_feature)
+            spectral_feature = F.interpolate(spectral_feature.permute(0, 3, 1, 2), size=(H,W), mode='bilinear', align_corners=False)
+            spectral_feature = spectral_feature.permute(0, 2, 3, 1)
             return handcrafted_feature, embedding_feature, spectral_feature
         else:
             return handcrafted_feature, embedding_feature
 
     def get_prompt(self, x, prompt, block_num, depth_num):
         feat = 0
-        B, H, W =  prompt[1].shape[0],  prompt[1].shape[1],  prompt[1].shape[2]
+        # B, H, W =  prompt[1].shape[0],  prompt[1].shape[1],  prompt[1].shape[2]
         if self.handcrafted_tune:
-            feat += prompt[0].reshape(B, H, W, -1)
+            feat += prompt[0]  # .reshape(B, H, W, -1)
         if self.embedding_tune:
             feat += prompt[1]
         if self.spectralfeat_tune:

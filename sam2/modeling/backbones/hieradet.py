@@ -208,6 +208,7 @@ class Hiera(nn.Module):
         embedding_tune: bool = True,
         spectralfeat_tune: bool = True,
         use_statistical_feats: bool = True,
+        dofa_name: str = 'vit_base_patch16_224',
         dofa_ckpt_path: str = None,
     ):
         super().__init__()
@@ -267,7 +268,7 @@ class Hiera(nn.Module):
                                                     self.input_type, self.freq_nums, self.adaptor,
                                                     self.default_img_size, self.use_statistical_feats,
                                                     self.handcrafted_tune, self.embedding_tune, 
-                                                    self.spectralfeat_tune, dofa_ckpt_path,
+                                                    self.spectralfeat_tune, dofa_name, dofa_ckpt_path,
                                                     )
 
         cur_stage = 1
@@ -357,7 +358,6 @@ class Hiera(nn.Module):
 
         outputs = []
         cur_stage = 0
-        print(f'adapted stage starts: {self.adaptor_stage_starts}')
         for i, blk in enumerate(self.blocks):
             if i in self.adaptor_stage_starts:
                 cur_stage += 1

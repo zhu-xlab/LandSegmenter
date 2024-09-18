@@ -24,7 +24,8 @@ model:
       embedding_tune: True
       spectralfeat_tune: True
       use_statistical_feats: True
-      dofa_ckpt_path: /p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/checkpoints/DOFA_ViT_large_e100.pth
+      # dofa_name: vit_base_patch16
+      # dofa_ckpt_path: /p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/checkpoints/DOFA_ViT_base_e120.pth
     neck:
       _target_: sam2.modeling.backbones.image_encoder.FpnNeck
       position_encoding:

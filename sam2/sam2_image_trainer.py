@@ -64,7 +64,11 @@ class SAM2ImageTrainer(pl.LightningModule):
         """
         super().__init__()
         # copnstruct sam2-based model (image encoder and prompt encoder weights are automatically fixed)
-        self.model = build_sam2(args.config_file, args.ckpt_path, args.ckpt_path_clip, args.load_de)
+        hydra_overrides_extra = [f'++model.image_encoder.trunk.spectralfeat_tune={args.dofa_type is not None}',
+                                 f'++model.image_encoder.trunk.dofa_name={args.dofa_type}',
+                                 f'++model.image_encoder.trunk.dofa_ckpt_path={args.dofa_ckpt_path}',]
+        self.model = build_sam2(args.config_file, args.ckpt_path, args.ckpt_path_clip, args.load_de,
+                                hydra_overrides_extra=hydra_overrides_extra)
         # set up the losses: dice and focal
         self.use_multiclass_loss = args.use_multiclass_loss
         self._get_loss()
@@ -95,28 +99,6 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.n_train_batches = int(args.n_batch_tr/(args.nodes*args.devices))
         # display interval
         self.display_inv = args.display_inv
-
-    #     # Dictionary to keep track of parameter usage
-    #     self.param_usage = {name: False for name, _ in self.model.named_parameters()}
-
-    #     # Register backward hooks on parameters
-    #     for name, param in self.model.named_parameters():
-    #         if param.requires_grad:
-    #             param.register_hook(self._create_hook(name))
-    #     self.automatic_optimization = False
-
-    # def _create_hook(self, name):
-    #     def hook(grad):
-    #         self.param_usage[name] = True
-    #     return hook
-    
-    # def _find_unused(self):
-    #     # Log unused parameters at the end of each epoch
-    #     unused_params = [name for name, used in self.param_usage.items() if not used]
-    #     if unused_params:
-    #         print(f'Unused parameters this epoch: {unused_params}')
-    #     else:
-    #         print('All parameters were used this epoch.')
 
     # ------ forward propogation ------ #
     def forward(self, x, prompt, waves=None):  # text prompt: here is the tokenized tensor
@@ -266,12 +248,6 @@ class SAM2ImageTrainer(pl.LightningModule):
         # training image examples  
         if batch_idx==0 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
             self._log_imgs('tr', x[0], masks[0], y[0])
-        
-        # opt = self.optimizers()
-        # opt.zero_grad()
-        # self.manual_backward(loss)
-        # self._find_unused()
-        # opt.step()
         
         return loss
     

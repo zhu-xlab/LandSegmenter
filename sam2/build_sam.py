@@ -19,7 +19,7 @@ def build_sam2(
     load_decoder_weights=True,
     test_mode=False,
     hydra_overrides_extra=[],
-    apply_postprocessing=True,
+    apply_postprocessing=False,
     device=torch.device("cpu"),
     **kwargs,
 ):
