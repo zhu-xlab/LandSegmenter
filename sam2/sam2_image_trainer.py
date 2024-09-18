@@ -71,7 +71,7 @@ class SAM2ImageTrainer(pl.LightningModule):
                                 hydra_overrides_extra=hydra_overrides_extra)
         # set up the losses: dice and focal
         self.use_multiclass_loss = args.use_multiclass_loss
-        self._get_loss()
+        self._set_loss_functions()
 
         # Spatial dim for backbone feature maps
         self._bb_feat_sizes = [
@@ -186,64 +186,18 @@ class SAM2ImageTrainer(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # main step
         # get data
-        x = batch[KEY_IMG].contiguous()
-        # x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode='bilinear', align_corners=False).contiguous()
-        y = batch[KEY_LBL].contiguous()
-        waves = batch[KEY_WAVE][0]
-        # existance GT
-        y_exist = torch.zeros((y.shape[0], len(CLS_DICT)), device=self.device)
-        for i in range(len(CLS_DICT)):
-            ye_ = (y==i).sum(axis=(1,2))
-            y_exist[:,i] = (ye_>0).to(y_exist.dtype)
-        # prepare prompt
-        prompt_tokens, y, n_classes = self._prepare_prompt(CLS_DICT, y)
-        # lbl_type = batch[KEY_LBLTYPE]  # indicate the type of labels: 0 - gt, 1 - ns
-        # assert lbl_type in [0, 1], 'Please provide correct label type (0 - gt, 1 - ns)!'
+        x, y, waves, y_exist, n_classes, prompt_tokens = self._get_data(batch)
         
         # prediction
         masks, iou_predictions, exist_predictions = self.forward(x, prompt_tokens, waves)
-        # print(f'In trainer: waves - {waves}')
+        
+        # prediction IoUs
+        ious = self._get_ious(masks.detach(), y)
         
         # calculate losses 
-        loss = torch.tensor(0.0, device=self.device)
-        # binary loss
-        for L, w in zip([self.BDLoss, self.BFLoss], [self.wdice, self.wfocal]):
-            for c in range(n_classes):  
-                y_ = (y==c).to(y.dtype)
-                y_[y==MASK_CODE] = MASK_CODE
-                loss_ = w*L(masks[:,c], y_)
-                loss += loss_
-        # multi-class loss
-        if self.use_multiclass_loss:
-            for L, w in zip([self.DLoss, self.FLoss], [self.wdice, self.wfocal]):
-                loss_ = w*L(masks, y)
-                loss += loss_
-        self.log('tr_loss_mask', loss, on_epoch=True, on_step=False, sync_dist=True)
-        
-        # existance loss
-        loss_exist_matrix = self.BCELoss(exist_predictions, y_exist)
-        # calculate the proportion of labeled pixels to serve as the weights
-        y_proportions = ((y!=MASK_CODE).sum(axis=(1,2))/(y.shape[1]*y.shape[2]))[:,None]
-        y_proportions = y_proportions.repeat(1, n_classes)
-        w_exist = torch.max(y_proportions, y_exist)
-        # weighted existance loss according to the reliability
-        loss_exist = (w_exist*loss_exist_matrix).sum()/loss_exist_matrix.numel()
-        self.log('tr_loss_exist', loss_exist, on_epoch=True, on_step=False, sync_dist=True)
-
-        # iou loss
-        ious = self._get_ious(masks.detach(), y)
-        loss_iou_matrix = self.L1Loss(iou_predictions, ious)
-        # calculate weighted iou loss
-        # weighting strategy: considering 1. the reliability of the existance prediction, 2. the reliability of the iou prediction
-        loss_iou = ((y_proportions[y_exist>0] * loss_iou_matrix[y_exist>0]).sum() \
-                + self.wiou_no * (y_proportions[y_exist==0] * loss_iou_matrix[y_exist==0]).sum()\
-                    ) / loss_iou_matrix.numel()
-        
-        # final loss
-        loss = loss \
-            + loss_iou*n_classes \
-            + loss_exist
-        self.log('tr_loss', loss, on_epoch=True, on_step=False, sync_dist=True)
+        loss = self._calculate_loss(self, n_classes, y, y_exist, ious, 
+                        masks, exist_predictions, iou_predictions,
+                        )
         
         # training image examples  
         if batch_idx==0 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
@@ -261,6 +215,24 @@ class SAM2ImageTrainer(pl.LightningModule):
 
 
     # ------ Model utilities ------ #
+    def _get_data(self, batch):
+        x = batch[KEY_IMG].contiguous()
+        y = batch[KEY_LBL].contiguous()
+        waves = batch[KEY_WAVE][0]
+        # existance GT
+        y_exist = torch.zeros((y.shape[0], len(CLS_DICT)), device=self.device)
+        for i in range(len(CLS_DICT)):
+            ye_ = (y==i).sum(axis=(1,2))
+            y_exist[:,i] = (ye_>0).to(y_exist.dtype)
+        
+        # prepare prompt
+        prompt_tokens, y, n_classes = self._prepare_prompt(CLS_DICT, y)
+        # lbl_type = batch[KEY_LBLTYPE]  # indicate the type of labels: 0 - gt, 1 - ns
+        # assert lbl_type in [0, 1], 'Please provide correct label type (0 - gt, 1 - ns)!'
+
+        return x, y, waves, y_exist, n_classes, prompt_tokens
+
+
     def _get_image_embed(
         self,
         input_image: Union[torch.Tensor],  # [B, C, H, W]
@@ -371,7 +343,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         return masks, iou_predictions, exist_predictions
     
     
-    def _get_loss(self):
+    def _set_loss_functions(self):
         # Cross Entropy
         self.BCELoss = nn.BCEWithLogitsLoss(reduction='none')  
         # Dice
@@ -446,16 +418,9 @@ class SAM2ImageTrainer(pl.LightningModule):
 
     def _do_validation(self, batch, batch_idx, prefix):
         # get data
-        x = batch[KEY_IMG].contiguous()
-        # x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode='bilinear', align_corners=False).contiguous()
-        waves = batch[KEY_WAVE][0]
-        y = batch[KEY_LBL].contiguous()
-        # prompt = batch[KEY_PROMPT]
-        prompt_tokens, y, n_classes = self._prepare_prompt(CLS_DICT, y, train_mode=False)
+        x, y, waves, y_exist, n_classes, prompt_tokens = self._get_data(batch)
 
         # prediction
-        # print(f'In validation: waves - {waves.shape}, {type(waves)}')
-        # print(waves)
         masks, iou_predictions, existance_predictions = self.forward(x, prompt_tokens, waves)
         
         # ious
@@ -469,5 +434,54 @@ class SAM2ImageTrainer(pl.LightningModule):
         if batch_idx==0 and self.trainer.global_rank==0:
             for i in range(4):
                 self._log_imgs(prefix, x[i], masks[i], y[i])
+    
+
+    def _calculate_loss(self, n_classes, y, y_exist, ious, 
+                        mask_predictions, exist_predictions, iou_predictions,
+                        from_aux_decoder=False):
+        aux_tag = '_aux' if from_aux_decoder else ''
+        # calculate losses 
+        loss = torch.tensor(0.0, device=self.device)
+        # binary loss
+        for L, w in zip([self.BDLoss, self.BFLoss], [self.wdice, self.wfocal]):
+            for c in range(n_classes):  
+                y_ = (y==c).to(y.dtype)
+                y_[y==MASK_CODE] = MASK_CODE
+                loss_ = w*L(mask_predictions[:,c], y_)
+                loss += loss_
+        # multi-class loss
+        if self.use_multiclass_loss:
+            for L, w in zip([self.DLoss, self.FLoss], [self.wdice, self.wfocal]):
+                loss_ = w*L(mask_predictions, y)
+                loss += loss_
+        self.log(f'tr{aux_tag}_loss_mask', loss, on_epoch=True, on_step=False, sync_dist=True)
+        
+        # existance loss
+        loss_exist_matrix = self.BCELoss(exist_predictions, y_exist)
+        # calculate the proportion of labeled pixels to serve as the weights
+        y_proportions = ((y!=MASK_CODE).sum(axis=(1,2))/(y.shape[1]*y.shape[2]))[:,None]
+        y_proportions = y_proportions.repeat(1, n_classes)
+        w_exist = torch.max(y_proportions, y_exist)
+        # weighted existance loss according to the reliability
+        loss_exist = (w_exist*loss_exist_matrix).sum()/loss_exist_matrix.numel()
+        self.log(f'tr{aux_tag}_loss_exist', loss_exist, on_epoch=True, on_step=False, sync_dist=True)
+
+        # iou loss
+        loss_iou_matrix = self.L1Loss(iou_predictions, ious)
+        # calculate weighted iou loss
+        # weighting strategy: considering 1. the reliability of the existance prediction, 2. the reliability of the iou prediction
+        loss_iou = ((y_proportions[y_exist>0] * loss_iou_matrix[y_exist>0]).sum() \
+                + self.wiou_no * (y_proportions[y_exist==0] * loss_iou_matrix[y_exist==0]).sum()\
+                    ) / loss_iou_matrix.numel()
+        
+        # final loss
+        loss = loss \
+            + loss_iou*n_classes \
+            + loss_exist
+        self.log(f'tr{aux_tag}_loss', loss, on_epoch=True, on_step=False, sync_dist=True)
+
+        return loss
+        
+        
 
 
