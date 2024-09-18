@@ -55,7 +55,9 @@ def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights):
             if missing_keys:
                 # print(missing_keys)
                 for mk in missing_keys:
-                    if mk.startswith('image_encoder') or mk.startswith("sam_mask_decoder.") or mk.startswith("no_mem_embed"):
+                    if (mk.startswith('image_encoder') and 'prompt_generator' not in mk) \
+                          or mk.startswith("sam_mask_decoder.") \
+                            or mk.startswith("no_mem_embed"):
                         if not mk.startswith("sam_mask_decoder.existance_prediction_head"):
                             raise RuntimeError(f'Unexpected missing key: {mk}')
             print("Loaded image encoder and decoder weights from SAM2 checkpoint")
@@ -68,7 +70,8 @@ def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights):
             missing_keys_contain_decoder = False
             if missing_keys:
                 for mk in missing_keys:
-                    if mk.startswith('image_encoder') or mk.startswith("no_mem_embed"):
+                    if (mk.startswith('image_encoder') and 'prompt_generator' not in mk) \
+                        or mk.startswith("no_mem_embed"):
                         raise RuntimeError(f'Unexpected missing key: {mk}')
                     if mk.startswith("sam_mask_decoder."):
                         missing_keys_contain_decoder = True
@@ -111,7 +114,7 @@ def _load_checkpoint_test(model, ckpt_path):
 def _fix_pretrain_weights(model):
     # fix encoder weights
     for name, param in model.named_parameters():
-        if 'image_encoder' in name:
+        if 'image_encoder' in name and 'prompt_generator' not in name:
             param.requires_grad = False
         if 'sam_prompt_encoder' in name:
             param.requires_grad = False

@@ -34,8 +34,8 @@ from sam2.modeling.text_simple_tokenizer import SimpleTokenizer
 FINAL_LR = 1e-8
 KEY_IMG = 'image'
 KEY_LBL = 'label'
-# KEY_CLSN = 'cn_dict'
-KEY_LBLTYPE = 'label_type'
+KEY_DATASAT = 'dataset'
+KEY_WAVE = 'waves'
 MASK_CODE = 255
 INPUT_SIZE = 1024
 TEXT_PREFIX = 'A photo of '
@@ -95,13 +95,35 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.n_train_batches = int(args.n_batch_tr/(args.nodes*args.devices))
         # display interval
         self.display_inv = args.display_inv
-        
+
+    #     # Dictionary to keep track of parameter usage
+    #     self.param_usage = {name: False for name, _ in self.model.named_parameters()}
+
+    #     # Register backward hooks on parameters
+    #     for name, param in self.model.named_parameters():
+    #         if param.requires_grad:
+    #             param.register_hook(self._create_hook(name))
+    #     self.automatic_optimization = False
+
+    # def _create_hook(self, name):
+    #     def hook(grad):
+    #         self.param_usage[name] = True
+    #     return hook
+    
+    # def _find_unused(self):
+    #     # Log unused parameters at the end of each epoch
+    #     unused_params = [name for name, used in self.param_usage.items() if not used]
+    #     if unused_params:
+    #         print(f'Unused parameters this epoch: {unused_params}')
+    #     else:
+    #         print('All parameters were used this epoch.')
 
     # ------ forward propogation ------ #
-    def forward(self, x, prompt):  # text prompt: here is the tokenized tensor
+    def forward(self, x, prompt, waves=None):  # text prompt: here is the tokenized tensor
         batch_size = x.shape[0]
         # image embeddings
-        img_feats = self._get_image_embed(x)
+        # print(f'In trainer-forward: waves - {waves}')
+        img_feats = self._get_image_embed(x, waves)
         # prompt text embeddings
         n_classes = prompt.shape[0]
         text_embeddings = self.model.sam_prompt_encoder(prompt) # [n_prompt, dim] dim=512 (clip dim)
@@ -182,9 +204,10 @@ class SAM2ImageTrainer(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # main step
         # get data
-        x = batch[KEY_IMG]
-        x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode='bilinear', align_corners=False).contiguous()
-        y = batch[KEY_LBL]
+        x = batch[KEY_IMG].contiguous()
+        # x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode='bilinear', align_corners=False).contiguous()
+        y = batch[KEY_LBL].contiguous()
+        waves = batch[KEY_WAVE][0]
         # existance GT
         y_exist = torch.zeros((y.shape[0], len(CLS_DICT)), device=self.device)
         for i in range(len(CLS_DICT)):
@@ -196,8 +219,8 @@ class SAM2ImageTrainer(pl.LightningModule):
         # assert lbl_type in [0, 1], 'Please provide correct label type (0 - gt, 1 - ns)!'
         
         # prediction
-        masks, iou_predictions, exist_predictions = self.forward(x, prompt_tokens)
-        # masks, iou_predictions, exist_predictions = masks.contiguous(), iou_predictions.contiguous(), exist_predictions.contiguous()
+        masks, iou_predictions, exist_predictions = self.forward(x, prompt_tokens, waves)
+        # print(f'In trainer: waves - {waves}')
         
         # calculate losses 
         loss = torch.tensor(0.0, device=self.device)
@@ -244,6 +267,12 @@ class SAM2ImageTrainer(pl.LightningModule):
         if batch_idx==0 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
             self._log_imgs('tr', x[0], masks[0], y[0])
         
+        # opt = self.optimizers()
+        # opt.zero_grad()
+        # self.manual_backward(loss)
+        # self._find_unused()
+        # opt.step()
+        
         return loss
     
 
@@ -259,6 +288,7 @@ class SAM2ImageTrainer(pl.LightningModule):
     def _get_image_embed(
         self,
         input_image: Union[torch.Tensor],  # [B, C, H, W]
+        wave_list: List[float],
     ) -> None:
         """
         Calculates the image embeddings for the provided image, allowing
@@ -269,12 +299,13 @@ class SAM2ImageTrainer(pl.LightningModule):
           with pixel values in [0, 255].
           image_format (str): The color format of the image, in ['RGB', 'BGR'].
         """
-        assert (
-            len(input_image.shape) == 4 and input_image.shape[1] == 3
-        ), f"input_image must be of size 1x3xHxW, got {input_image.shape}"
+        # assert (
+        #     len(input_image.shape) == 4 and input_image.shape[1] == 3
+        # ), f"input_image must be of size 1x3xHxW, got {input_image.shape}"
         logging.info("Computing image embeddings for the provided image...")
         batch_size = input_image.shape[0]
-        backbone_out = self.model.forward_image(input_image)
+        # print(f'In trainer-embed: waves - {wave_list}')
+        backbone_out = self.model.forward_image(input_image, wave_list)
         vision_feats = self.model._prepare_backbone_features(backbone_out)
         # Add no_mem_embed, which is added to the lowest rest feat. map during training on videos
         # if self.model.directly_add_no_mem_embed:
@@ -428,25 +459,28 @@ class SAM2ImageTrainer(pl.LightningModule):
                'ground truth': {'mask_data': y.detach().cpu().numpy(), 'class_labels': class_labels}
                 }
         # get rgb img
-        x = F.interpolate(x.unsqueeze(0), size=(256,256), mode='bilinear', align_corners=False).squeeze(0)
+        # x = F.interpolate(x.unsqueeze(0), size=(256,256), mode='bilinear', align_corners=False).squeeze(0)
         if x.shape[0]==3:
             rgb_img = x.detach().cpu().numpy().transpose((1,2,0))
         elif x.shape[0]>3:
-            rgb_img = x[0,[3,2,1]].detach().cpu().numpy().transpose((1,2,0))
+            rgb_img = x[:3].detach().cpu().numpy().transpose((1,2,0))
         mask_img = wandb.Image(rgb_img, masks=masks)
         wandb.log({f'{prefix}_masks': mask_img})
 
 
     def _do_validation(self, batch, batch_idx, prefix):
         # get data
-        x = batch[KEY_IMG]
-        x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode='bilinear', align_corners=False).contiguous()
-        y = batch[KEY_LBL]
+        x = batch[KEY_IMG].contiguous()
+        # x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode='bilinear', align_corners=False).contiguous()
+        waves = batch[KEY_WAVE][0]
+        y = batch[KEY_LBL].contiguous()
         # prompt = batch[KEY_PROMPT]
         prompt_tokens, y, n_classes = self._prepare_prompt(CLS_DICT, y, train_mode=False)
 
         # prediction
-        masks, iou_predictions, existance_predictions = self.forward(x, prompt_tokens)
+        # print(f'In validation: waves - {waves.shape}, {type(waves)}')
+        # print(waves)
+        masks, iou_predictions, existance_predictions = self.forward(x, prompt_tokens, waves)
         
         # ious
         ious = self._get_ious(masks.detach(), y)

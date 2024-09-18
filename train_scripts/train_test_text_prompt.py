@@ -59,11 +59,12 @@ def main():
     ###### 2 - load data ######
     # datasets
     trans_tr = A.Compose([A.RandomCrop(width=args.patch_size, height=args.patch_size),
-                          A.Resize(width=INPUT_SIZE, height=INPUT_SIZE, interpolation=cv2.INTER_NEAREST),
-                          A.Flip(p=0.5),
+                        #   A.Resize(width=INPUT_SIZE, height=INPUT_SIZE, interpolation=cv2.INTER_NEAREST),
+                          A.D4(p=0.5), # A.Flip(p=0.5),
                           A.Rotate(p=0.2),
                           ])
-    trans_ts = A.Compose([A.Resize(width=INPUT_SIZE, height=INPUT_SIZE, interpolation=cv2.INTER_NEAREST),])
+    trans_ts = A.Compose([A.Resize(width=args.patch_size, height=args.patch_size, 
+                                   interpolation=cv2.INTER_NEAREST),])
     def get_dataset(data_path, trans=None):
         dataset = DWOSMDataset(data_path, mode=args.it, n_bands=args.n_channels, 
                                transform=trans)

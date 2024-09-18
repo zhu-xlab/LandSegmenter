@@ -4,16 +4,17 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+from typing import List
 import torch
 import torch.distributed
-import torch.nn.functional as F
+# import torch.nn.functional as F
 
 from torch.nn.init import trunc_normal_
 
 from sam2.modeling.sam.mask_decoder import MaskDecoder
 from sam2.modeling.sam.prompt_encoder import PromptEncoderCLIP
 from sam2.modeling.sam.transformer import TwoWayTransformer
-from sam2.modeling.sam2_utils import get_1d_sine_pe, MLP, select_closest_cond_frames
+# from sam2.modeling.sam2_utils import get_1d_sine_pe, MLP, select_closest_cond_frames
 
 # a large negative value as a placeholder score for missing objects
 NO_OBJ_SCORE = -1024.0
@@ -123,9 +124,9 @@ class SAM2Base(torch.nn.Module):
             )
         
 
-    def forward_image(self, img_batch: torch.Tensor):
+    def forward_image(self, img_batch: torch.Tensor, waves: List[float]):
         """Get the image feature on the input batch."""
-        backbone_out = self.image_encoder(img_batch)
+        backbone_out = self.image_encoder(img_batch, waves)
         if self.use_high_res_features_in_sam:
             # precompute projected level 0 and level 1 features in SAM decoder
             # to avoid running it again on every SAM click

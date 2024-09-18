@@ -30,11 +30,13 @@ S2C_MEAN = [1605.57504906, 1390.78157673, 1314.8729939, 1363.52445545, 1549.4437
 S2C_STD = [786.78685367, 850.34818441, 875.06484736, 1138.84957046, 1122.17775652, 1161.59187054, 1274.39184232, 1248.42891965, 1345.52684884, 577.31607053, 51.15431158, 1336.09932639, 1136.53823676]
 
 BANDS ={3:  [3,2,1],
-        #  9: [1,2,3,4,5,6,7,11,12],
         9:  [3,2,1,4,5,6,7,11,12], # satlas/dofa bands
-        10: [1,2,3,4,5,6,7,8,11,12],
-        12: [0,1,2,3,4,5,6,7,8,9,11,12], # remove B10 - cirrus band
-        13: [0,1,2,3,4,5,6,7,8,9,10,11,12]}
+        10: [3,2,1,4,5,6,7,8,11,12],
+        12: [3,2,1,0,4,5,6,7,8,9,11,12], # remove B10 - cirrus band
+        13: [3,2,1,0,4,5,6,7,8,9,10,11,12]}
+
+WAVELENS_S2 = np.array([0.443, 0.490, 0.56, 0.665, 0.705, 0.740, 0.783, 0.842, 0.865, 0.940, 1.375, 1.61, 2.19])
+WAVELENS_S1 = np.array([3.75, 3.75])
 
 SDTYPE = {1:np.float32, 2:np.uint16}
 
@@ -42,8 +44,8 @@ CLS_DICT = {0:'Water', 1:'Trees', 2:'Grass', 3:'Flooded vegetation', 4:'Crops', 
             
 KEY_IMG = 'image'
 KEY_LBL = 'label'
-KEY_CLSN = 'cn_dict'
-KEY_LBLTYPE = 'label_type'
+KEY_DATASAT = 'dataset'
+KEY_WAVE = 'waves'
 MASK_CODE = 255
 
 # band-wise data clip
@@ -325,31 +327,22 @@ class DWOSMDataset(Dataset):
         # concatenate s1 and s2
         if self.mode == 's1':
             img = imgs[1]
+            waves = WAVELENS_S1
         elif self.mode == 's2': 
             img = imgs[2]
+            waves = WAVELENS_S2[BANDS[self.n_bands]]
         else:
-            img = np.concatenate([imgs[1], imgs[2]], axis=0)
-        
-        # # prepare prompt
-        # gt = np.full_like(lbl, MASK_CODE)
-        # n_prompt = random.choice(self.n_prompts)
-        # if n_prompt == 9:
-        #     lbl_classes = [i for i in range(9)]
-        # else:
-        #     lbl_classes = np.unique(lbl).tolist()
-        #     lbl_classes.remove(255)
-        #     if n_prompt > len(lbl_classes):
-        #         prompt_inds_empty = [i for i in range(9) if i not in lbl_classes]
-        #         lbl_classes += random.sample(prompt_inds_empty, n_prompt-len(lbl_classes))
-        # prompt_inds = random.sample(lbl_classes, n_prompt)
-        # prompts = [CLS_DICT[i] for i in prompt_inds]
-        # for i, ind in enumerate(prompt_inds):
-        #     gt[lbl==ind] = i
+            img = np.concatenate([imgs[1], imgs[0]], axis=0)  # s2 then s1
+            waves = np.hstack([WAVELENS_S2[BANDS[self.n_bands]],WAVELENS_S1])
+        waves.tolist()
         
         # transform for (img,lbl) pairs
         img, lbl = self.transform((img, lbl))                
         
-        return {KEY_IMG: img, KEY_LBL: lbl.long()}
+        return {KEY_IMG: img, 
+                KEY_LBL: lbl.long(), 
+                KEY_DATASAT: self.lbl_type,
+                KEY_WAVE: waves}
     
     def __len__(self):
         return self.length
@@ -404,8 +397,11 @@ if __name__ == '__main__':
     
     for i, s2c in enumerate(val_loader):
         if i == selected_i:
-            img, lbl = s2c['img'], s2c['gt']
+            img, lbl, da, wave = s2c[KEY_IMG], s2c[KEY_LBL], s2c[KEY_DATASAT], s2c[KEY_WAVE]
             print(img.shape, img.dtype, img.mean(), img.min(), img.max(), lbl.shape, lbl.dtype, np.unique(lbl))
+            print(da)
+            print(wave.shape, wave.dtype)
+            print(wave[0])
             # plt.figure(figsize=(10,5))
             # plt.subplot(121)
             # # plt.imshow((img.numpy()[si,[3,2,1]]).transpose(1,2,0))
@@ -414,23 +410,23 @@ if __name__ == '__main__':
             # plt.imshow(lbl[si].numpy(),norm=mpl.colors.Normalize(vmin=0,vmax=8))
             break
     
-    for i, s2c in enumerate(test_loader):
-        if i == selected_i:
-            img, lbl = s2c['img'], s2c['gt']
-            print(img.shape, img.dtype, img.mean(), img.min(), img.max(), lbl.shape, lbl.dtype, np.unique(lbl))
-            print(img[:2].mean(), img[:2].std())
-            # plt.figure(figsize=(10,5))
-            # plt.subplot(121)
-            # # plt.imshow((img.numpy()[si,[3,2,1]]).transpose(1,2,0))
-            # plt.imshow((img[si][[5,4,3]].numpy()).transpose(1,2,0))
-            # plt.subplot(122)
-            # plt.imshow(lbl[si].numpy(),norm=mpl.colors.Normalize(vmin=0,vmax=8))
-            # plt.figure(figsize=(10,5))
-            # plt.subplot(121)
-            # plt.imshow((img[si][0].numpy()))
-            # plt.subplot(122)
-            # plt.imshow((img[si][1].numpy()))
-            break
+    # for i, s2c in enumerate(test_loader):
+    #     if i == selected_i:
+    #         img, lbl = s2c['img'], s2c['gt']
+    #         print(img.shape, img.dtype, img.mean(), img.min(), img.max(), lbl.shape, lbl.dtype, np.unique(lbl))
+    #         print(img[:2].mean(), img[:2].std())
+    #         # plt.figure(figsize=(10,5))
+    #         # plt.subplot(121)
+    #         # # plt.imshow((img.numpy()[si,[3,2,1]]).transpose(1,2,0))
+    #         # plt.imshow((img[si][[5,4,3]].numpy()).transpose(1,2,0))
+    #         # plt.subplot(122)
+    #         # plt.imshow(lbl[si].numpy(),norm=mpl.colors.Normalize(vmin=0,vmax=8))
+    #         # plt.figure(figsize=(10,5))
+    #         # plt.subplot(121)
+    #         # plt.imshow((img[si][0].numpy()))
+    #         # plt.subplot(122)
+    #         # plt.imshow((img[si][1].numpy()))
+    #         break
 
 
 

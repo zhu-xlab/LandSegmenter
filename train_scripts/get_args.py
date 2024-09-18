@@ -70,7 +70,7 @@ def get_common_args(parser):
     parser.add_argument('--dice_loss_weight', dest='wdice', type=float, default=1.0, help='Weight of dice loss')
     parser.add_argument('--iou_no_object_weight', dest='wiou_no', type=float, default=0.5, help='Weight of iou loss for no object')
     parser.add_argument('--use_multiclass_loss', action='store_true', default=False, help='Use multiclass loss or not')
-    parser.add_argument('--amp', action='store_false', help='Use mixed precision or not')
+    parser.add_argument('--amp', action='store_false', default=True, help='Use mixed precision or not')
     parser.add_argument('--scheduler_type', dest='schdt', type=str, default='none', choices=['none','cos','step','exp'], help='Type of scheduler to use')
     parser.add_argument('--scheduler_values', dest='schdv', type=float, nargs='*', default=[], help='Values of scheduler to use (the epoch indexes for step scheduler; number of iterations for cosine scheduler)')
     # wandb settings
@@ -90,9 +90,9 @@ def get_common_args(parser):
 def set_log_files(args):
     # group name
     if args.ntr>0: 
-        args.gname = f'test_remoteclip_{args.dataset_name}_{args.ntr}'
+        args.gname = f'test_adaptor_{args.dataset_name}_{args.ntr}'
     else:
-        args.gname = f'test_remoteclip_{args.dataset_name}_all'
+        args.gname = f'test_adaptor_{args.dataset_name}_all'
     # using pretrained decoder or not
     args.gname += '_deI' if args.load_de else '_deN'
     # using multiclass loss or not

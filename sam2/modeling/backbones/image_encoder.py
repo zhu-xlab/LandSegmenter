@@ -26,9 +26,9 @@ class ImageEncoder(nn.Module):
             self.trunk.channel_list == self.neck.backbone_channel_list
         ), f"Channel dims of trunk and neck do not match. Trunk: {self.trunk.channel_list}, neck: {self.neck.backbone_channel_list}"
 
-    def forward(self, sample: torch.Tensor):
+    def forward(self, sample: torch.Tensor, wave_list: List[float] = None):
         # Forward through backbone
-        features, pos = self.neck(self.trunk(sample))
+        features, pos = self.neck(self.trunk(sample, wave_list))
         if self.scalp > 0:
             # Discard the lowest resolution features
             features, pos = features[: -self.scalp], pos[: -self.scalp]

@@ -10,6 +10,7 @@ from typing import List, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+# from torch.amp import autocast
 
 from sam2.modeling.backbones.utils import (
     PatchEmbed,
@@ -18,6 +19,7 @@ from sam2.modeling.backbones.utils import (
 )
 
 from sam2.modeling.sam2_utils import DropPath, MLP
+from sam2.modeling.backbones.image_encoder_adaptor import PromptGenerator
 
 
 def do_pool(x: torch.Tensor, pool: nn.Module, norm: nn.Module = None) -> torch.Tensor:
@@ -171,29 +173,42 @@ class Hiera(nn.Module):
 
     def __init__(
         self,
-        embed_dim: int = 96,  # initial embed dim
-        num_heads: int = 1,  # initial number of heads
+        embed_dims=[144, 288, 576, 1152],
+        embed_dim: int = 144,# initial embed dim
+        num_heads: int = 2,  # initial number of heads
         drop_path_rate: float = 0.0,  # stochastic depth
         q_pool: int = 3,  # number of q_pool stages
         q_stride: Tuple[int, int] = (2, 2),  # downsample stride bet. stages
-        stages: Tuple[int, ...] = (2, 3, 16, 3),  # blocks per stage
+        stages: Tuple[int, ...] = (2, 6, 36, 4),  # blocks per stage
         dim_mul: float = 2.0,  # dim_mul factor at stage shift
         head_mul: float = 2.0,  # head_mul factor at stage shift
-        window_pos_embed_bkg_spatial_size: Tuple[int, int] = (14, 14),
+        window_pos_embed_bkg_spatial_size: Tuple[int, int] = (7, 7),
         # window size per stage, when not using global att.
         window_spec: Tuple[int, ...] = (
             8,
             4,
-            14,
-            7,
+            16,
+            8
         ),
         # global attn in these blocks
         global_att_blocks: Tuple[int, ...] = (
-            12,
-            16,
-            20,
+            23,
+            33,
+            43
         ),
         return_interm_layers=True,  # return feats from every stage
+        # adaptor settings
+        adaptor: str = None, # if None, no adaptor is used, the following settings are ignored
+        scale_factor: int = 32,
+        input_type: str = 'fft',       
+        prompt_type: str = 'highpass',   # prompt type for fft
+        tuning_stage: str = "1234",
+        freq_nums: float = 0.25,
+        handcrafted_tune: bool = True,
+        embedding_tune: bool = True,
+        spectralfeat_tune: bool = True,
+        use_statistical_feats: bool = True,
+        dofa_ckpt_path: str = None,
     ):
         super().__init__()
 
@@ -225,6 +240,35 @@ class Hiera(nn.Module):
         dpr = [
             x.item() for x in torch.linspace(0, drop_path_rate, depth)
         ]  # stochastic depth decay rule
+
+        # predefined image sizes
+        self.sam2_img_size = 1024
+        self.dofa_img_size = 224
+        self.default_img_size = 256
+
+        # prepare adaptor
+        self.embed_dim = embed_dims
+        self.stages = stages
+        if adaptor is not None:
+            self.adaptor = adaptor
+            self.adaptor_stage_starts = [0] + \
+                [sum(stages[:i])+1 for i in range(1,len(stages))]
+            self.scale_factor = scale_factor
+            self.prompt_type = prompt_type
+            self.tuning_stage = tuning_stage
+            self.input_type = input_type
+            self.freq_nums = freq_nums
+            self.handcrafted_tune = handcrafted_tune
+            self.embedding_tune = embedding_tune
+            self.spectralfeat_tune = spectralfeat_tune
+            self.use_statistical_feats = use_statistical_feats
+            self.prompt_generator = PromptGenerator(self.scale_factor, self.prompt_type, self.embed_dim,
+                                                    self.tuning_stage, self.stages,
+                                                    self.input_type, self.freq_nums, self.adaptor,
+                                                    self.default_img_size, self.use_statistical_feats,
+                                                    self.handcrafted_tune, self.embedding_tune, 
+                                                    self.spectralfeat_tune, dofa_ckpt_path,
+                                                    )
 
         cur_stage = 1
         self.blocks = nn.ModuleList()
@@ -271,8 +315,9 @@ class Hiera(nn.Module):
         )
         pos_embed = pos_embed.permute(0, 2, 3, 1)
         return pos_embed
-
-    def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
+    
+    def forward_without_adaptor(self, x: torch.Tensor) -> List[torch.Tensor]:
+        x = F.interpolate(x, size=(self.sam2_img_size, self.sam2_img_size), mode='bilinear', align_corners=False).contiguous()
         x = self.patch_embed(x)
         # x: (B, H, W, C)
 
@@ -289,3 +334,114 @@ class Hiera(nn.Module):
                 outputs.append(feats)
 
         return outputs
+
+    def forward_with_adaptor(self, x: torch.Tensor, wave_list: List[float] = None) -> List[torch.Tensor]:
+        inp = x
+        x = x[:, :3] # sam2 only uses RGB channels
+        x = F.interpolate(x[:, :3], size=(self.sam2_img_size, self.sam2_img_size), mode='bilinear', align_corners=False).contiguous()
+
+        # original sam2 part
+        x = self.patch_embed(x)   # x: (B, H, W, C)
+        # Add pos embed
+        x = x + self._get_pos_embed(x.shape[1:3])
+
+        # extract handcrafted features - return dict with key of the stage where the handcrafted features are used
+        handcraft_feats = self.prompt_generator.init_handcrafted(inp) 
+        # handcrafted1, handcrafted2, handcrafted3, handcrafted4 = self.prompt_generator.init_handcrafted(inp)
+
+        # dofa spectral features
+        if self.spectralfeat_tune:
+            if inp.shape[-1] != self.dofa_img_size:
+                inp = F.interpolate(inp, size=(self.dofa_img_size, self.dofa_img_size), mode='bilinear', align_corners=False).contiguous()
+            spectral_feats = self.prompt_generator.init_spectral_feature(inp, wave_list)
+
+        outputs = []
+        cur_stage = 0
+        print(f'adapted stage starts: {self.adaptor_stage_starts}')
+        for i, blk in enumerate(self.blocks):
+            if i in self.adaptor_stage_starts:
+                cur_stage += 1
+                if str(cur_stage) in self.tuning_stage:
+                    prompts = self.prompt_generator.init_prompt(
+                        x, handcraft_feats[str(cur_stage)], cur_stage,
+                        spectral_feature=spectral_feats[str(cur_stage)] if self.spectralfeat_tune else None,
+                    )   # 0: handcrafted, 1: reprojected embeddings, 2: spectral features
+                cur_depth = 0
+            # integrate adaptor prompt features
+            if str(cur_stage) in self.tuning_stage:
+                x = self.prompt_generator.get_prompt(
+                    x, prompts, cur_stage, cur_depth
+                )
+            # sam2 forword path
+            x = blk(x)
+            cur_depth += 1
+            if (i == self.stage_ends[-1]) or (
+                i in self.stage_ends and self.return_interm_layers
+            ):
+                feats = x.permute(0, 3, 1, 2)
+                outputs.append(feats)
+
+        # self.block1 = []
+        # self.block2 = []
+        # self.block3 = []
+        # self.block4 = []
+        # outputs = []
+
+        # for i, blk in enumerate(self.blocks):
+        #     if i < 3:
+        #         self.block1.append(blk)  # 第一个块包含前3个元素
+        #     elif 2 < i < 9:
+        #         self.block2.append(blk)  # 第二个块包含接下来的6个元素
+        #     elif 8 < i < 45:
+        #         self.block3.append(blk)  # 第三个块包含接下来的36个元素
+        #     elif 44 < i:
+        #         self.block4.append(blk)  # 其余元素组成第四个块
+
+        # if '1' in self.tuning_stage:
+        #     prompt1 = self.prompt_generator.init_prompt(x, handcrafted1, 1)
+        # for i, blk in enumerate(self.block1):
+        #     if '1' in self.tuning_stage:
+        #         x = self.prompt_generator.get_prompt(x, prompt1, 1, i)
+        #     x = blk(x)
+        #     if i == 1:
+        #         feat = x.permute(0, 3, 1, 2)
+        #         outputs.append(feat)
+
+        # if '2' in self.tuning_stage:
+        #     prompt2 = self.prompt_generator.init_prompt(x, handcrafted2, 2)
+        # for i, blk in enumerate(self.block2):
+        #     if '2' in self.tuning_stage:
+        #         x = self.prompt_generator.get_prompt(x, prompt2, 2, i)
+        #     x = blk(x)
+        #     if i == 4:
+        #         feat = x.permute(0, 3, 1, 2)
+        #         outputs.append(feat)
+
+        # if '3' in self.tuning_stage:
+        #     prompt3 = self.prompt_generator.init_prompt(x, handcrafted3, 3)
+        # for i, blk in enumerate(self.block3):
+        #     if '3' in self.tuning_stage:
+        #         x = self.prompt_generator.get_prompt(x,prompt3, 3, i)
+        #     x = blk(x)
+        #     if i == 34:
+        #         feat = x.permute(0, 3, 1, 2)
+        #         outputs.append(feat)
+
+        # if '4' in self.tuning_stage:
+        #     prompt4 = self.prompt_generator.init_prompt(x, handcrafted4, 4)
+        # for i, blk in enumerate(self.block4):
+        #     if '4' in self.tuning_stage:
+        #         x = self.prompt_generator.get_prompt(x, prompt4, 4, i)
+        #     x = blk(x)
+        #     if i == 2:
+        #         feat = x.permute(0, 3, 1, 2)
+        #         outputs.append(feat)
+
+        return outputs
+
+    def forward(self, x: torch.Tensor, wave_list: List[float] = None) -> List[torch.Tensor]:
+        # with autocast(device_type=x.device.type):
+        if self.adaptor is not None:
+            return self.forward_with_adaptor(x, wave_list)
+        else:
+            return self.forward_without_adaptor(x)
