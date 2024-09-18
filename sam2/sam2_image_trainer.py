@@ -101,7 +101,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.display_inv = args.display_inv
 
     # ------ forward propogation ------ #
-    def forward(self, x, prompt, waves=None):  # text prompt: here is the tokenized tensor
+    def forward(self, x, prompt, waves=None, use_aux=False):  # text prompt: here is the tokenized tensor
         batch_size = x.shape[0]
         # image embeddings
         # print(f'In trainer-forward: waves - {waves}')
@@ -118,8 +118,10 @@ class SAM2ImageTrainer(pl.LightningModule):
         high_res_features = [
             feat_level.repeat(n_classes, 1, 1, 1) for feat_level in img_feats["high_res_feats"]
         ]
+        
+        mask_decoder = self.model.sam_mask_decoder_aux if use_aux else self.model.sam_mask_decoder
         masks, iou_predictions, exist_predictions = self._pred_mask_and_iou(
-            self.model.sam_mask_decoder,
+            mask_decoder,
             img_feats["image_embed"], text_embeddings, high_res_features, n_classes, batch_size)
         
         return masks, iou_predictions, exist_predictions
@@ -195,7 +197,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         ious = self._get_ious(masks.detach(), y)
         
         # calculate losses 
-        loss = self._calculate_loss(self, n_classes, y, y_exist, ious, 
+        loss = self._calculate_loss(n_classes, y, y_exist, ious, 
                         masks, exist_predictions, iou_predictions,
                         )
         
