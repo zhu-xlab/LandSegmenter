@@ -58,6 +58,7 @@ def get_common_args(parser):
     parser.add_argument('--ckpt-path', type=str, default='checkpoints/sam2_hiera_large.pt', help='Path to the checkpoint file (sam2)')
     parser.add_argument('--ckpt-path-clip', type=str, default='checkpoints/RemoteCLIP-ViT-B-32.pt', help='Path to the checkpoint file (clip)') 
     parser.add_argument('--load-decoder-weights', dest='load_de', action='store_true', default=False, help='Whether to load decoder weights or not')
+    parser.add_argument('--use-auxiliary-decoder', dest='use_aux_decoder', action='store_true', default=False, help='Whether to use auxiliary decoder (double decoders) or not')
     parser.add_argument('--dofa-type', type=str, default=None, choices=['vit_base_patch16', 'vit_large_patch16'], help='Type of DoFA model to use. Default is None (not using dofa).')
     parser.add_argument('--dofa-ckpt-path', type=str, default=None, help='Path to the checkpoint file (dofa)')
     parser.add_argument('--resume', type=str, default=False, help='Path of the checkpoint file from which the training is resumed.')
@@ -91,8 +92,9 @@ def get_common_args(parser):
 
 def set_log_files(args):
     # group name
+    aux = '_aux' if args.use_aux_decoder else ''
     if args.dofa_type is not None:
-        args.gname = f'test_adaptor_dofa{args.dofa_type[4]}_{args.dataset_name}'
+        args.gname = f'FT_dofa{args.dofa_type[4]}{aux}_{args.dataset_name}'
     args.gname += f'_{args.ntr}' if args.ntr>0 else '_all'
     # using pretrained decoder or not
     args.gname += '_deI' if args.load_de else '_deN'
@@ -174,7 +176,7 @@ def get_device_info(args):
                 print('No GPU found, switch to CPU mode.')
             elif args.devices == 1:
                 args.current_device = 0
-                print('Uising 1 GPU for training!')
+                print('Using 1 GPU for training!')
             else:
                 args.current_device = int(os.environ["LOCAL_RANK"])
                 print(f'No slurm found! Uising {args.devices} local GPUs for training (current:{args.current_device})!')
@@ -182,10 +184,13 @@ def get_device_info(args):
         if args.accelerator == 'cpu':
             args.devices = 1
             args.current_device = 0
-            print('Uising CPU for training!')
+            print('Using CPU for training!')
             # args.devices = os.cpu_count()
             # print(f'Uising {args.devices} CPU cores for training!')
 
     ndevs = args.nodes * args.devices
-    args.strategy = 'ddp' if ndevs>1 else 'auto'
+    if ndevs>1: 
+        args.strategy = 'ddp_find_unused_parameters_true' # if args.use_aux_decoder else 'ddp' 
+    else:
+        args.strategy = 'auto'
     return args

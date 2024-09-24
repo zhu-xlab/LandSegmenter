@@ -19,6 +19,7 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from train_scripts.get_args import get_args_dw as get_args
 from sam2.sam2_image_trainer import SAM2ImageTrainer
+from sam2.sam2_image_w_auxDe_trainer import SAM2ImageTrainerAux
 
 # dataset
 from dataset.dwosm_dataset_lmdb import DWOSMDataset, SegAugTransforms
@@ -120,8 +121,10 @@ def main():
     
     ###### 3 - define the model ######
     torch.set_float32_matmul_precision('high')
-    # if args.n_classes<8: args.n_classes = args.n_classes+1 # add one class for the background
-    model = SAM2ImageTrainer(args)
+    if args.use_aux_decoder:
+        model = SAM2ImageTrainerAux(args)
+    else:
+        model = SAM2ImageTrainer(args)
     
     
     ###### 4 - train the model ######

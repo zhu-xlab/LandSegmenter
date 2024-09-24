@@ -89,6 +89,15 @@ class MaskDecoder(nn.Module):
             sigmoid_output=iou_prediction_use_sigmoid,
         )
 
+        # head to predict the precise mask quality
+        self.precise_prediction_head = MLP(
+            transformer_dim,
+            iou_head_hidden_dim,
+            self.num_mask_tokens,
+            iou_head_depth,
+            sigmoid_output=iou_prediction_use_sigmoid,
+        )
+
         # head to predict whether the current scene contains the target class or not
         self.existance_prediction_head = MLP(
             transformer_dim,
@@ -109,6 +118,7 @@ class MaskDecoder(nn.Module):
         self,
         image_embeddings: torch.Tensor,
         text_embeddings: torch.Tensor,
+        noise_mask_embeddings: torch.Tensor,
         multimask_output: bool = False,
         repeat_image: bool = False,
         high_res_features: Optional[List[torch.Tensor]] = None,
@@ -130,9 +140,10 @@ class MaskDecoder(nn.Module):
           torch.Tensor: batched SAM token for mask output
         """
         # masks, iou_pred, mask_tokens_out, object_score_logits = self.predict_masks(
-        masks, iou_pred, exist_pred, _ = self.predict_masks(
+        masks, iou_pred, precise_pred, exist_pred, _ = self.predict_masks(
             image_embeddings=image_embeddings,
             text_embeddings=text_embeddings,
+            noise_mask_embeddings=noise_mask_embeddings,
             repeat_image=repeat_image,
             high_res_features=high_res_features,
         )
@@ -141,6 +152,7 @@ class MaskDecoder(nn.Module):
         if multimask_output:
             masks = masks[:, 1:, :, :]
             iou_pred = iou_pred[:, 1:]
+            precise_pred = precise_pred[:, 1:]
             exist_pred = exist_pred[:, 1:]
         elif self.dynamic_multimask_via_stability and not self.training:
             print('wrong if', self.dynamic_multimask_via_stability, self.training)
@@ -148,15 +160,17 @@ class MaskDecoder(nn.Module):
         else:   # multimask_output=False
             masks = masks[:, 0:1, :, :]
             iou_pred = iou_pred[:, 0:1]
+            precise_pred = precise_pred[:, 0:1]
             exist_pred = exist_pred[:, 0:1]
 
         # Prepare output
-        return masks, iou_pred, exist_pred
+        return masks, iou_pred, precise_pred, exist_pred
 
     def predict_masks(
         self,
         image_embeddings: torch.Tensor,
         text_embeddings: torch.Tensor, # text_embeddings: [bs, n_prompt, dim]
+        noise_mask_embeddings: torch.Tensor,
         repeat_image: bool,
         high_res_features: Optional[List[torch.Tensor]] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -177,7 +191,10 @@ class MaskDecoder(nn.Module):
         else:
             assert image_embeddings.shape[0] == tokens.shape[0]  # check batch size
             src = image_embeddings
-        src = src # + dense_prompt_embeddings
+        
+        # Add noise mask info for quality prediction
+        src = src + noise_mask_embeddings
+        # src = src + dense_prompt_embeddings
         # assert (
         #     image_pe.size(0) == 1
         # ), "image_pe should have size 1 in batch dim (from `get_dense_pe()`)"
@@ -210,11 +227,12 @@ class MaskDecoder(nn.Module):
 
         # Generate mask quality predictions
         iou_pred = self.iou_prediction_head(iou_token_out)
+        precise_pred = self.precise_prediction_head(iou_token_out)
 
         # Generate class existence predictions
         exist_pred = self.existance_prediction_head(iou_token_out)
         
-        return masks, iou_pred, exist_pred, mask_tokens_out
+        return masks, iou_pred, precise_pred, exist_pred, mask_tokens_out
 
     def _get_stability_scores(self, mask_logits):
         """

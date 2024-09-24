@@ -9,11 +9,13 @@ import torch
 import torch.distributed
 # import torch.nn.functional as F
 
+from torch import nn
 from torch.nn.init import trunc_normal_
 
 from sam2.modeling.sam.mask_decoder import MaskDecoder
 from sam2.modeling.sam.prompt_encoder import PromptEncoderCLIP
 from sam2.modeling.sam.transformer import TwoWayTransformer
+from sam2.modeling.sam2_utils import LayerNorm2d
 # from sam2.modeling.sam2_utils import get_1d_sine_pe, MLP, select_closest_cond_frames
 
 # a large negative value as a placeholder score for missing objects
@@ -29,6 +31,7 @@ class SAM2Base(torch.nn.Module):
         backbone_stride=16,  # stride of the image backbone output
         use_high_res_features_in_sam=False,
         iou_prediction_use_sigmoid=False,
+        noise_mask_in_chans=16,
         sam_mask_decoder_extra_args=None,
         compile_image_encoder: bool = False,
     ):
@@ -42,6 +45,7 @@ class SAM2Base(torch.nn.Module):
         self.use_high_res_features_in_sam = use_high_res_features_in_sam
         self.num_feature_levels = 3 if use_high_res_features_in_sam else 1
         self.hidden_dim = self.image_encoder.neck.d_model
+        self.noise_mask_in_chans = noise_mask_in_chans
         # a single token to indicate no memory embedding for image processing
         self.no_mem_embed = torch.nn.Parameter(torch.zeros(1, 1, self.hidden_dim))
         trunc_normal_(self.no_mem_embed, std=0.02)
@@ -105,6 +109,18 @@ class SAM2Base(torch.nn.Module):
             iou_prediction_use_sigmoid=self.iou_prediction_use_sigmoid,
             **(self.sam_mask_decoder_extra_args or {}),
         )
+        # for noise mask quality prediction
+        self.sam_noise_mask_downscaling = nn.Sequential(
+            nn.Conv2d(1, self.noise_mask_in_chans // 4, kernel_size=2, stride=2),
+            LayerNorm2d(self.noise_mask_in_chans // 4),
+            nn.GELU(),
+            nn.Conv2d(self.noise_mask_in_chans // 4, self.noise_mask_in_chans, kernel_size=2, stride=2),
+            LayerNorm2d(self.noise_mask_in_chans),
+            nn.GELU(),
+            nn.Conv2d(self.noise_mask_in_chans, self.hidden_dim, kernel_size=1),
+        )
+        self.no_noise_mask_embed = nn.Embedding(1, self.hidden_dim)
+
         # for co-teaching
         if self.use_auxiliary_decoder:
             self.sam_mask_decoder_aux = MaskDecoder(
@@ -122,7 +138,17 @@ class SAM2Base(torch.nn.Module):
                 iou_prediction_use_sigmoid=self.iou_prediction_use_sigmoid,
                 **(self.sam_mask_decoder_extra_args or {}),
             )
-        
+            # for noise mask quality prediction
+            self.sam_noise_mask_downscaling_aux = nn.Sequential(
+                nn.Conv2d(1, self.noise_mask_in_chans // 4, kernel_size=2, stride=2),
+                LayerNorm2d(self.noise_mask_in_chans // 4),
+                nn.GELU(),
+                nn.Conv2d(self.noise_mask_in_chans // 4, self.noise_mask_in_chans, kernel_size=2, stride=2),
+                LayerNorm2d(self.noise_mask_in_chans),
+                nn.GELU(),
+                nn.Conv2d(self.noise_mask_in_chans, self.hidden_dim, kernel_size=1),
+            )
+            self.no_noise_mask_embed_aux = nn.Embedding(1, self.hidden_dim)
 
     def forward_image(self, img_batch: torch.Tensor, waves: List[float]):
         """Get the image feature on the input batch."""
@@ -163,10 +189,5 @@ class SAM2Base(torch.nn.Module):
         vision_feats = [x.flatten(2).permute(2, 0, 1) for x in feature_maps]
         # vision_pos_embeds = [x.flatten(2).permute(2, 0, 1) for x in vision_pos_embeds]
 
-        # auxiliary decoder
-        if self.use_auxiliary_decoder:
-            feature_maps_aux = backbone_out["backbone_fpn_aux"]
-            vision_feats_aux = [x.flatten(2).permute(2, 0, 1) for x in feature_maps_aux]
-            return vision_feats, vision_feats_aux
         # return backbone_out, vision_feats, vision_pos_embeds, feat_sizes
         return vision_feats

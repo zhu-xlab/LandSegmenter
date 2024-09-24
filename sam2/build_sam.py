@@ -58,7 +58,7 @@ def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights):
                     if (mk.startswith('image_encoder') and 'prompt_generator' not in mk) \
                           or mk.startswith("sam_mask_decoder.") \
                             or mk.startswith("no_mem_embed"):
-                        if not mk.startswith("sam_mask_decoder.existance_prediction_head"):
+                        if mk.split(".")[1] not in ['existance_prediction_head', 'precise_prediction_head']:
                             raise RuntimeError(f'Unexpected missing key: {mk}')
             print("Loaded image encoder and decoder weights from SAM2 checkpoint")
         else:

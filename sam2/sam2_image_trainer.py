@@ -66,7 +66,8 @@ class SAM2ImageTrainer(pl.LightningModule):
         # copnstruct sam2-based model (image encoder and prompt encoder weights are automatically fixed)
         hydra_overrides_extra = [f'++model.image_encoder.trunk.spectralfeat_tune={args.dofa_type is not None}',
                                  f'++model.image_encoder.trunk.dofa_name={args.dofa_type}',
-                                 f'++model.image_encoder.trunk.dofa_ckpt_path={args.dofa_ckpt_path}',]
+                                 f'++model.image_encoder.trunk.dofa_ckpt_path={args.dofa_ckpt_path}',
+                                 f'++model.use_auxiliary_decoder={args.use_aux_decoder}',]
         self.model = build_sam2(args.config_file, args.ckpt_path, args.ckpt_path_clip, args.load_de,
                                 hydra_overrides_extra=hydra_overrides_extra)
         # set up the losses: dice and focal
@@ -106,26 +107,56 @@ class SAM2ImageTrainer(pl.LightningModule):
         # image embeddings
         # print(f'In trainer-forward: waves - {waves}')
         img_feats = self._get_image_embed(x, waves)
+        _, _, h, w = img_feats["image_embed"].shape   # [batch_size, 256, 16, 16]
         # prompt text embeddings
         n_classes = prompt.shape[0]
         text_embeddings = self.model.sam_prompt_encoder(prompt) # [n_prompt, dim] dim=512 (clip dim)
         text_embeddings = self.model.sam_prompt_fn(text_embeddings) # [n_prompt, dim] dim=256
-        text_embeddings = rearrange(text_embeddings.repeat(batch_size, 1),
-                                    '(batch_size n_classes) dim -> (n_classes batch_size) dim', 
-                                    batch_size=batch_size,
-                                    n_classes=n_classes)
-        # Predict masks
-        high_res_features = [
-            feat_level.repeat(n_classes, 1, 1, 1) for feat_level in img_feats["high_res_feats"]
-        ]
         
+        # noise mask embeddings
+        no_noise_mask_embed = self.model.no_noise_mask_embed_aux if use_aux else self.model.no_noise_mask_embed
+        noise_mask_embeddings = no_noise_mask_embed.weight.reshape(1, -1, 1, 1).expand(
+            n_classes*batch_size, -1, h, w
+            )
+        # # # # # DEBUGGING # # # #
+        # print(f'In trainer-forward: noise_mask_embeddings - {noise_mask_embeddings.shape}')
+        
+        # make predictions
         mask_decoder = self.model.sam_mask_decoder_aux if use_aux else self.model.sam_mask_decoder
-        masks, iou_predictions, exist_predictions = self._pred_mask_and_iou(
+        masks, iou_predictions, precise_predictions, exist_predictions = self._pred_mask_and_iou(
             mask_decoder,
-            img_feats["image_embed"], text_embeddings, high_res_features, n_classes, batch_size)
+            img_feats, text_embeddings, noise_mask_embeddings,
+            n_classes, batch_size)
         
-        return masks, iou_predictions, exist_predictions
+        return masks, iou_predictions, precise_predictions, exist_predictions, img_feats, text_embeddings
     
+    def forward_w_mask(self, noise_mask, img_feats, text_embeddings, use_aux=False):
+        n_classes = text_embeddings.shape[0]
+        batch_size = noise_mask.shape[0]
+        # prepare binary masks
+        if noise_mask.dim()==3:
+            mask_w_nodata = torch.sum(noise_mask==MASK_CODE)>0
+            if mask_w_nodata:
+                nodata_mask = noise_mask==MASK_CODE
+                noise_mask[nodata_mask] = 0
+            noise_mask = F.one_hot(noise_mask, n_classes).permute(0,3,1,2).float()
+            if mask_w_nodata:
+                noise_mask[:,0][nodata_mask] = 0
+        # rearrange noise mask to be compatible with image feature embeddings
+        noise_mask = rearrange(noise_mask.to(text_embeddings.dtype), 'b c h w -> (c b) 1 h w')
+        # noise mask embeddings
+        sam_noise_mask_downscaling = self.model.sam_noise_mask_downscaling_aux if use_aux else self.model.sam_noise_mask_downscaling
+        noise_mask_embeddings = sam_noise_mask_downscaling(noise_mask)
+
+        # make predictions
+        mask_decoder = self.model.sam_mask_decoder_aux if use_aux else self.model.sam_mask_decoder
+        _, iou_predictions, precise_predictions, _ = self._pred_mask_and_iou(
+            mask_decoder,
+            img_feats, text_embeddings, noise_mask_embeddings,
+            n_classes, batch_size)
+        
+        return iou_predictions, precise_predictions
+        
 
     # ------ Optimizer ------ #
     def configure_optimizers(self):
@@ -191,14 +222,15 @@ class SAM2ImageTrainer(pl.LightningModule):
         x, y, waves, y_exist, n_classes, prompt_tokens = self._get_data(batch)
         
         # prediction
-        masks, iou_predictions, exist_predictions = self.forward(x, prompt_tokens, waves)
+        masks, iou_predictions, precise_predictions, exist_predictions, _, _ = \
+            self.forward(x, prompt_tokens, waves)
         
-        # prediction IoUs
-        ious = self._get_ious(masks.detach(), y)
+        # prediction accuracies
+        precises, ious = self._get_accs(masks.detach(), y)
         
         # calculate losses 
-        loss = self._calculate_loss(n_classes, y, y_exist, ious, 
-                        masks, exist_predictions, iou_predictions,
+        loss = self._calculate_loss(n_classes, y, y_exist, ious, precises, 
+                        masks, exist_predictions, iou_predictions, precise_predictions,
                         )
         
         # training image examples  
@@ -319,11 +351,25 @@ class SAM2ImageTrainer(pl.LightningModule):
         return result, gt, n_prompt
 
 
-    def _pred_mask_and_iou(self, decoder, img_embeddings, text_embeddings, high_res_features, n_classes, batch_size):
-        masks, iou_predictions, exist_predictions = decoder(
-            image_embeddings=img_embeddings.repeat(n_classes, 1, 1, 1),
+    def _pred_mask_and_iou(self, decoder, img_feats, text_embeddings, noise_mask_embeddings,
+                           n_classes, batch_size):
+        # rearrange text embeddings
+        text_embeddings = rearrange(text_embeddings.unsqueeze(0).expand(batch_size, -1, -1),
+                                    'batch_size n_classes dim -> (n_classes batch_size) dim', 
+                                    batch_size=batch_size,
+                                    n_classes=n_classes)
+        
+        # get high resolution features
+        high_res_features = [
+            feat_level.repeat(n_classes, 1, 1, 1) for feat_level in img_feats["high_res_feats"]
+        ]
+
+        # get predictions
+        masks, iou_predictions, precise_predictions, exist_predictions = decoder(
+            image_embeddings=img_feats["image_embed"].repeat(n_classes, 1, 1, 1),
             multimask_output=self.multimask_output,
             text_embeddings=text_embeddings.unsqueeze(1),
+            noise_mask_embeddings=noise_mask_embeddings,
             high_res_features=high_res_features,
         )
 
@@ -333,16 +379,24 @@ class SAM2ImageTrainer(pl.LightningModule):
                           '(n_classes batch_size) H W -> batch_size n_classes H W',
                           batch_size=batch_size,
                           n_classes=n_classes)
+        
+        # accuracy predictions
         iou_predictions = rearrange(torch.squeeze(iou_predictions, dim=1), 
                                     '(n_classes batch_size) -> batch_size n_classes',
                                     batch_size=batch_size,
                                     n_classes=n_classes)
+        precise_predictions = rearrange(torch.squeeze(precise_predictions, dim=1), 
+                                        '(n_classes batch_size) -> batch_size n_classes',
+                                        batch_size=batch_size,
+                                        n_classes=n_classes)
         exist_predictions = torch.clamp(exist_predictions, -32.0, 32.0)
         exist_predictions = rearrange(torch.squeeze(exist_predictions, dim=1),
                                       '(n_classes batch_size) -> batch_size n_classes',
                                       batch_size=batch_size,
                                       n_classes=n_classes)
-        return masks, iou_predictions, exist_predictions
+        
+        # outputs
+        return masks, iou_predictions, precise_predictions, exist_predictions
     
     
     def _set_loss_functions(self):
@@ -370,17 +424,20 @@ class SAM2ImageTrainer(pl.LightningModule):
         return
 
 
-    def _get_ious(self, masks, y, eps=1e-8):
-        ious = []
+    def _get_accs(self, masks, y, eps=1e-8):
+        ious, precises = [], []
         for c in range(masks.shape[1]):
-            p = (masks[:,c]>=0.5).to(masks.dtype)
+            p = (masks[:,c]>=0).to(masks.dtype)  # mask here is logits in [-32, 32]
             p[p==MASK_CODE] = 0
             y_ = (y==c).to(masks.dtype)
             tp = (p*y_).sum(axis=(1,2))
+            precise = (tp+eps)/(p.sum(axis=(1,2))+eps)
             iou = (tp+eps)/(p.sum(axis=(1,2))+y_.sum(axis=(1,2))-tp+eps)
+            precises.append(precise)
             ious.append(iou)
+        precises = torch.stack(precises, dim=1)
         ious = torch.stack(ious, dim=1)
-        return ious
+        return precises, ious
     
 
     def _get_exist_accuracy(self, exist_pred, y):
@@ -418,28 +475,31 @@ class SAM2ImageTrainer(pl.LightningModule):
         wandb.log({f'{prefix}_masks': mask_img})
 
 
-    def _do_validation(self, batch, batch_idx, prefix):
+    def _do_validation(self, batch, batch_idx, prefix, use_aux=False):
+        aux_tag = '_aux' if use_aux else ''
+
         # get data
         x, y, waves, y_exist, n_classes, prompt_tokens = self._get_data(batch)
 
         # prediction
-        masks, iou_predictions, existance_predictions = self.forward(x, prompt_tokens, waves)
+        masks, iou_predictions, precise_predictions, existance_predictions, _, _ = \
+            self.forward(x, prompt_tokens, waves, use_aux=use_aux)
         
         # ious
-        ious = self._get_ious(masks.detach(), y)
+        _, ious = self._get_accs(masks.detach(), y)
         exist_acc, y_exist = self._get_exist_accuracy(existance_predictions.detach(), y)
-        self.log(f'{prefix}_mious_exist', ious[y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
-        self.log(f'{prefix}_mious_noexist', ious[~y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
-        self.log(f'{prefix}_mious_pred_exist', iou_predictions[y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
-        self.log(f'{prefix}_mious_pred_noexist', iou_predictions[~y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
-        self.log(f'{prefix}_exist_acc', exist_acc, on_epoch=True, on_step=False, sync_dist=True)
+        self.log(f'{prefix}{aux_tag}_mious_exist', ious[y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
+        self.log(f'{prefix}{aux_tag}_mious_noexist', ious[~y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
+        self.log(f'{prefix}{aux_tag}_mious_pred_exist', iou_predictions[y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
+        self.log(f'{prefix}{aux_tag}_mious_pred_noexist', iou_predictions[~y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
+        self.log(f'{prefix}{aux_tag}_exist_acc', exist_acc, on_epoch=True, on_step=False, sync_dist=True)
         if batch_idx==0 and self.trainer.global_rank==0:
             for i in range(4):
-                self._log_imgs(prefix, x[i], masks[i], y[i])
+                self._log_imgs(prefix+aux_tag, x[i], masks[i], y[i])
     
 
-    def _calculate_loss(self, n_classes, y, y_exist, ious, 
-                        mask_predictions, exist_predictions, iou_predictions,
+    def _calculate_loss(self, n_classes, y, y_exist, ious, precises,
+                        mask_predictions, exist_predictions, iou_predictions, precise_predictions,
                         from_aux_decoder=False):
         aux_tag = '_aux' if from_aux_decoder else ''
         # calculate losses 
@@ -466,24 +526,31 @@ class SAM2ImageTrainer(pl.LightningModule):
         w_exist = torch.max(y_proportions, y_exist)
         # weighted existance loss according to the reliability
         loss_exist = (w_exist*loss_exist_matrix).sum()/loss_exist_matrix.numel()
+        loss_exist = loss_exist * n_classes
         self.log(f'tr{aux_tag}_loss_exist', loss_exist, on_epoch=True, on_step=False, sync_dist=True)
 
         # iou loss
         loss_iou_matrix = self.L1Loss(iou_predictions, ious)
+        loss_precise_matrix = self.L1Loss(precise_predictions, precises)
         # calculate weighted iou loss
         # weighting strategy: considering 1. the reliability of the existance prediction, 2. the reliability of the iou prediction
-        loss_iou = ((y_proportions[y_exist>0] * loss_iou_matrix[y_exist>0]).sum() \
-                + self.wiou_no * (y_proportions[y_exist==0] * loss_iou_matrix[y_exist==0]).sum()\
-                    ) / loss_iou_matrix.numel()
+        loss_iou = self._calculate_acc_loss(loss_iou_matrix, y_proportions, y_exist)
+        loss_precise = self._calculate_acc_loss(loss_precise_matrix, y_proportions, y_exist)
         
         # final loss
         loss = loss \
             + loss_iou*n_classes \
+            + loss_precise*n_classes \
             + loss_exist
         self.log(f'tr{aux_tag}_loss', loss, on_epoch=True, on_step=False, sync_dist=True)
 
         return loss
-        
+    
+    def _calculate_acc_loss(self, acc_loss_matrix, y_proportions, y_exist):
+        loss_acc = ((y_proportions[y_exist>0] * acc_loss_matrix[y_exist>0]).sum() \
+                    + self.wiou_no * (y_proportions[y_exist==0] * acc_loss_matrix[y_exist==0]).sum()\
+                    ) / acc_loss_matrix.numel()
+        return loss_acc
         
 
 
