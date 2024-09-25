@@ -30,6 +30,7 @@ S2C_MEAN = [1605.57504906, 1390.78157673, 1314.8729939, 1363.52445545, 1549.4437
 S2C_STD = [786.78685367, 850.34818441, 875.06484736, 1138.84957046, 1122.17775652, 1161.59187054, 1274.39184232, 1248.42891965, 1345.52684884, 577.31607053, 51.15431158, 1336.09932639, 1136.53823676]
 
 BANDS ={3:  [3,2,1],
+        4:  [3,2,1,8],  # 8: nir band
         9:  [3,2,1,4,5,6,7,11,12], # satlas/dofa bands
         10: [3,2,1,4,5,6,7,8,11,12],
         12: [3,2,1,0,4,5,6,7,8,9,11,12], # remove B10 - cirrus band
@@ -99,7 +100,7 @@ def data_normalize_s2(img):
     # data normalize
     img_new = []
     for b in range(n_bands):
-        img0 = single_band_normalize(img[b], S2C_MEAN[band_ids[b]], S2C_STD[band_ids[b]], clip=True)
+        img0 = single_band_normalize(img[b], S2C_MEAN[band_ids[b]], S2C_STD[band_ids[b]], clip=False)
         img_new.append(img0[None])
     
     # concatenate
@@ -116,7 +117,7 @@ def s1_exclude_outliers(img, head_rate=1, tail_rate=99):
     
 def single_band_normalize(img, mean, std, clip=False):
     if clip:
-        scale = 2
+        scale = 3
         min_value = mean - scale * std
         max_value = mean + scale * std
         img = np.clip(img, min_value, max_value)
@@ -225,7 +226,7 @@ class DWOSMDataset(Dataset):
     def __init__(self, lmdb_file, lbl_type='dw', mode='s2', n_bands=13, 
                  transform=None, s1_transform=None, s2_transform=None, 
                  s1_normalize=True, s2_normalize=True):
-        if n_bands not in [3,9,10,12,13]:
+        if n_bands not in list(BANDS.keys()):
             n_bands = 13
         self.n_bands = n_bands
         assert lbl_type in ['dw','osm'], f'Please set lbl_type to \'dw\' or \'osm\'! Current: {lbl_type}'
@@ -334,7 +335,6 @@ class DWOSMDataset(Dataset):
         else:
             img = np.concatenate([imgs[1], imgs[0]], axis=0)  # s2 then s1
             waves = np.hstack([WAVELENS_S2[BANDS[self.n_bands]],WAVELENS_S1])
-        waves.tolist()
         
         # transform for (img,lbl) pairs
         img, lbl = self.transform((img, lbl))                

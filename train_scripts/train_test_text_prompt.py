@@ -22,7 +22,7 @@ from sam2.sam2_image_trainer import SAM2ImageTrainer
 from sam2.sam2_image_w_auxDe_trainer import SAM2ImageTrainerAux
 
 # dataset
-from dataset.dwosm_dataset_lmdb import DWOSMDataset, SegAugTransforms
+from dataset.lmdb_dataset_dwosm import DWOSMDataset, SegAugTransforms
 from dataset.ssl4eodw_dataset_lmdb import SSL4EODataset
 import albumentations as A
 

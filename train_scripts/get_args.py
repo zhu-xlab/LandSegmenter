@@ -7,8 +7,33 @@ import numpy as np
 from pathlib import Path
 
 
+def get_args_1st_stage():
+    parser = argparse.ArgumentParser(description='Train SAM2 with exact labels')
+    # data settings
+    parser.add_argument('--dataset_name', type=str, nargs='*', default=['dw', 'dynamicearthnet', 'openearthmap'], 
+                        help='Names of the datasets used for training')
+    parser.add_argument('--max_dataset_size', type=int, default=None, help='Maximum number of samples used for training')
+
+    # get common arguments
+    parser = get_common_args(parser)
+
+    # initialize arguments
+    args = parser.parse_args()
+
+    # computing environment parameters
+    args = get_device_info(args)
+
+    # set saving dir
+    args = set_log_files(args)
+
+    return args
+
+
 def get_args_dw():
     parser = argparse.ArgumentParser(description='Fine-tune SAM2 with DW data')
+    # dataset name
+    parser.add_argument('--dataset_name', type=str, choices=['DWGT', 'SSL4EO'], help='Name of the dataset')
+    
     # data settings
     parser.add_argument('--test_path', type=str, default='E:/Datasets/DFC2020/lmdb/DFC2020_s12_test.lmdb')
     parser.add_argument('--label_type', dest='lbl_t', type=str, default='dw', choices=['dw', 'osm'], help='Type of label')
@@ -21,6 +46,15 @@ def get_args_dw():
     parser.add_argument('--data_name_s1', dest='dns1', type=str, default=None)
     parser.add_argument('--data_name_s2', dest='dns2', type=str, default=None)
     parser.add_argument('--data_name_weak_label', dest='dnwl', type=str, default=None)
+    
+    # others 
+    parser.add_argument('--input_type', dest='it', type=str, default='s2', choices=['s1', 's2', 's12'], help='Type of input data')
+    parser.add_argument('--n_channels', type=int, default=3, help='Number of input channels.') 
+    parser.add_argument('--patch_size', type=int, default=256, help='Random cropped Patch size before resizing to 1024.')
+    # parser.add_argument('--n-prompts', type=int, default=[9], nargs='*', help='Number of prompts')
+    parser.add_argument('--validation', dest='val', type=float, default=0., help='Percent of the data that is used as validation (0-1.0)')
+    parser.add_argument('--n_train', dest='ntr', type=int, default=-1, 
+                        help='Number of training samples used (1-total number of trainig samples, default=-1 to use all of samples for training)')
     
     # get common arguments
     parser = get_common_args(parser)
@@ -38,21 +72,13 @@ def get_args_dw():
 
 
 def get_common_args(parser):
-    # dataset name
-    parser.add_argument('--dataset_name', type=str, choices=['DWGT', 'SSL4EO'], help='Name of the dataset')
     # saving directory
     parser.add_argument('--save_dir', type=str, default='Results_test', help='Directory to save the results')  
     # data settings
-    parser.add_argument('--input_type', dest='it', type=str, default='s2', choices=['s1', 's2', 's12'], help='Type of input data')
-    parser.add_argument('--n_channels', type=int, default=3, help='Number of input channels.') 
     parser.add_argument('--patch_size', type=int, default=256, help='Random cropped Patch size before resizing to 1024.')
-    parser.add_argument('--n-prompts', type=int, default=[9], nargs='*', help='Number of prompts')
-    parser.add_argument('--validation', dest='val', type=float, default=0., help='Percent of the data that is used as validation (0-1.0)')
     parser.add_argument('--batch_size', dest='bs', type=int, default=5, help='Batch size')
     parser.add_argument('--test_batch_size', dest='tbs', type=int, default=5, help='Batch size for test and validation sets')
     parser.add_argument('--num_workers', '-n', metavar='NW', type=int, default=0, help='Number of workers for dataloaders')  
-    parser.add_argument('--n_train', dest='ntr', type=int, default=-1, 
-                        help='Number of training samples used (1-total number of trainig samples, default=-1 to use all of samples for training)')
     # model settings
     parser.add_argument('--model-config-file', dest='config_file', type=str, default='sam2_hiera_l.yaml', help='Path to the model config file')
     parser.add_argument('--ckpt-path', type=str, default='checkpoints/sam2_hiera_large.pt', help='Path to the checkpoint file (sam2)')
@@ -93,9 +119,19 @@ def get_common_args(parser):
 def set_log_files(args):
     # group name
     aux = '_aux' if args.use_aux_decoder else ''
+    if isinstance(args.dataset_name, list):
+        dataset_tag = 'exact'
+    else:
+        dataset_tag = args.dataset_name
     if args.dofa_type is not None:
-        args.gname = f'FT_dofa{args.dofa_type[4]}{aux}_{args.dataset_name}'
-    args.gname += f'_{args.ntr}' if args.ntr>0 else '_all'
+        args.gname = f'FT_dofa{args.dofa_type[4]}{aux}_{dataset_tag}'
+
+    # training size
+    if dataset_tag == args.dataset_name:
+        args.gname += f'_{args.ntr}' if args.ntr>0 else '_all'
+    else:
+        args.gname += f'_max{args.max_dataset_size}' if args.max_dataset_size is not None else ''
+
     # using pretrained decoder or not
     args.gname += '_deI' if args.load_de else '_deN'
     # using multiclass loss or not

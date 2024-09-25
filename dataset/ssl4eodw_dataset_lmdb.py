@@ -27,11 +27,10 @@ S2C_MEAN = [1605.57504906, 1390.78157673, 1314.8729939, 1363.52445545, 1549.4437
 S2C_STD = [786.78685367, 850.34818441, 875.06484736, 1138.84957046, 1122.17775652, 1161.59187054, 1274.39184232, 1248.42891965, 1345.52684884, 577.31607053, 51.15431158, 1336.09932639, 1136.53823676]
 
 BANDS ={3:  [3,2,1],
-        #  9: [1,2,3,4,5,6,7,11,12],
         9:  [3,2,1,4,5,6,7,11,12], # satlas/dofa bands
-        10: [1,2,3,4,5,6,7,8,11,12],
-        12: [0,1,2,3,4,5,6,7,8,9,11,12], # remove B10 - cirrus band
-        13: [0,1,2,3,4,5,6,7,8,9,10,11,12]}
+        10: [3,2,1,4,5,6,7,8,11,12],
+        12: [3,2,1,0,4,5,6,7,8,9,11,12], # remove B10 - cirrus band
+        13: [3,2,1,0,4,5,6,7,8,9,10,11,12]}
 
 CLS_DICT = {0:'Water', 1:'Trees', 2:'Grass', 3:'Flooded vegetation', 4:'Crops', 5:'Shrub and Scrub', 6:'Built area', 7:'Bare land', 8:'Ice and Snow'}
 
@@ -191,23 +190,23 @@ class SSL4EODataset(Dataset):
             img_s2 = img_s2[:, BANDS[self.n_bands]]
         
         # randomly select a season patch
-        if self.season is not None:
-            if self.season not in [0,1,2,3]:
-                self.season = np.random.choice([0,1,2,3])
+        if self.season in [0,1,2,3]:
+            season = self.season
         else:
-            self.season = np.random.choice([0,1,2,3])
+            season = np.random.choice([0,1,2,3])
+        print(f'index={index}, season={season}')
         if '1' in self.mode:
-            img_s1 = img_s1[self.season] 
+            img_s1 = img_s1[season] 
             # S1 /255 to [0,1]
             img_s1 = img_s1.astype(np.float32)/255
         if '2' in self.mode:
-            img_s2 = img_s2[self.season] 
+            img_s2 = img_s2[season] 
             # S2 normalize by /10000 or /255 to [0,1]
             if self.normalize:
                 img_s2 = normalize(img_s2)
             else:
                 img_s2 = img_s2.astype(np.float32)/255
-        ns = ns[self.season].astype(np.float32)
+        ns = ns[season].astype(np.float32)
         
         # separate transform for s1 and s2
         if '1' in self.mode and self.s1_transform is not None:
@@ -221,7 +220,7 @@ class SSL4EODataset(Dataset):
         elif self.mode == 's2':
             img = img_s2
         elif self.mode == 's12':
-            img = np.concatenate([img_s1, img_s2], axis=0)  # shape: (n_bands, H, W)  
+            img = np.concatenate([img_s2, img_s1], axis=0)  # shape: (n_bands, H, W)  
         
         # transform
         img, ns = self.transform((img, ns))                
@@ -251,30 +250,28 @@ class SegAugTransforms(ItemTransform):
     
     
 if __name__ == '__main__':
-    selected_i = 0
+    selected_i = 10
     mode = 's2'
     s = 3
     fp_ns = r'/p/project/hai_dm4eo/liu_ch/data/SSL4EO-S2/dw_labels.lmdb'
     fp_s1 = r'/p/project/hai_dm4eo/liu_ch/data/SSL4EO-S2/0k_251k_uint8_s1.lmdb'
     fp_s2 = r'/p/project/hai_dm4eo/liu_ch/data/SSL4EO-S2/0k_251k_uint8_s2c.lmdb'
-    trans = A.Compose([A.RandomCrop(width=256, height=256),
-                           A.Flip(),
-                           A.Rotate(p=0.2),
-                        #    A.RandomBrightnessContrast(p=0.2),
-                        #    A.GaussianBlur(0.1, 2.0, p=0.2),
-                           # A.ColorJitter(p=0.5)
-                           ])
+    # trans = A.Compose([A.RandomCrop(width=256, height=256),
+    #                        A.Flip(),
+    #                        A.Rotate(p=0.2),
+    #                     #    A.RandomBrightnessContrast(p=0.2),
+    #                     #    A.GaussianBlur(0.1, 2.0, p=0.2),
+    #                        # A.ColorJitter(p=0.5)
+    #                        ])
     
     train_dataset = SSL4EODataset(
         lmdb_file_ns  = fp_ns,
         lmdb_file_s1 = fp_s1,
         lmdb_file_s2 = fp_s2,
         mode = mode,
-        season=s,
+        # season=s,
         transform  = None, # SegAugTransforms(trans),
         normalize = False,
-        label_smooth=True,
-        smooth_prior_type='ts',
         )
     
     train_dataset_nt = SSL4EODataset(
@@ -285,8 +282,6 @@ if __name__ == '__main__':
         season=s,
         transform  = None, # SegAugTransforms(trans), # None,
         normalize = False,
-        label_smooth=True,
-        smooth_prior_type='t',
         )
     print(len(train_dataset), len(train_dataset_nt))
     
@@ -295,17 +290,17 @@ if __name__ == '__main__':
     
     for i, (s2c,s2c_nt) in enumerate(zip(train_loader,train_loader_nt)):
         if i == selected_i:
-            img, ns, lsm = s2c['img'], s2c['ns'], s2c['smooth_prior']
-            img_nt, ns_nt, lsm_nt = s2c_nt['img'], s2c_nt['ns'], s2c_nt['smooth_prior']
-            print(img.shape,img.dtype,img.min(),img.max(),ns.shape,ns.dtype,np.unique(ns))
-            print(lsm.shape,lsm.dtype,lsm.min(),lsm.max(),np.percentile(lsm,84),torch.numel(lsm),(lsm>0).sum()/torch.numel(lsm),(lsm==1).sum()/torch.numel(lsm))
-            a = lsm.sum(axis=1)
-            print(a.shape,a.dtype,a.min(),a.max())
-            print(img_nt.shape,img_nt.dtype,img_nt.min(),img_nt.max(), ns_nt.shape,ns_nt.dtype,np.unique(ns_nt))
-            print(lsm_nt.shape,lsm_nt.dtype,lsm_nt.min(),lsm_nt.max(),np.percentile(lsm_nt,84),torch.numel(lsm_nt),(lsm_nt>0).sum()/torch.numel(lsm_nt),(lsm_nt==1).sum()/torch.numel(lsm_nt))
-            b = lsm_nt.sum(axis=1)
-            print(b.shape,b.dtype,b.min(),b.max())
-            ind = 1
+            # img, ns, lsm = s2c['img'], s2c['ns'], s2c['smooth_prior']
+            # img_nt, ns_nt, lsm_nt = s2c_nt['img'], s2c_nt['ns'], s2c_nt['smooth_prior']
+            # print(img.shape,img.dtype,img.min(),img.max(),ns.shape,ns.dtype,np.unique(ns))
+            # print(lsm.shape,lsm.dtype,lsm.min(),lsm.max(),np.percentile(lsm,84),torch.numel(lsm),(lsm>0).sum()/torch.numel(lsm),(lsm==1).sum()/torch.numel(lsm))
+            # a = lsm.sum(axis=1)
+            # print(a.shape,a.dtype,a.min(),a.max())
+            # print(img_nt.shape,img_nt.dtype,img_nt.min(),img_nt.max(), ns_nt.shape,ns_nt.dtype,np.unique(ns_nt))
+            # print(lsm_nt.shape,lsm_nt.dtype,lsm_nt.min(),lsm_nt.max(),np.percentile(lsm_nt,84),torch.numel(lsm_nt),(lsm_nt>0).sum()/torch.numel(lsm_nt),(lsm_nt==1).sum()/torch.numel(lsm_nt))
+            # b = lsm_nt.sum(axis=1)
+            # print(b.shape,b.dtype,b.min(),b.max())
+            # ind = 1
             # if '2' in mode:
             #     plt.figure(figsize=(10,10))
             #     plt.subplot(221)

@@ -81,6 +81,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         # loss weights
         self.wfocal = args.wfocal
         self.wdice = args.wdice
+        self.use_multicalss_loss = args.use_multiclass_loss
         # optimizer
         self.opt = args.opt
         self.lr = args.lr
@@ -239,6 +240,9 @@ class SAM2ImageTrainer(pl.LightningModule):
                 yc[y_aux==MASK_CODE] = MASK_CODE
                 loss_aux_ = w*L(masks_aux[:,c], yc)
                 loss_aux += loss_aux_
+        # if self.use_multicalss_loss:
+        #     for L, w in zip([self.DLoss, self.FLoss], [self.wdice, self.wfocal]):
+        #         loss_ = w*L(masks, y) 
         self.log('tr_loss_mask', loss, on_epoch=True, on_step=False, sync_dist=True)
         self.log('tr_loss_mask_aux', loss_aux, on_epoch=True, on_step=False, sync_dist=True)
         
@@ -431,21 +435,24 @@ class SAM2ImageTrainer(pl.LightningModule):
         # Cross Entropy - for sample selection
         self.BCELoss = nn.BCEWithLogitsLoss(reduction='none')  
         # Dice
-        # self.DLoss = DiceLoss(mode='multiclass', 
-        #                       from_logits=True, 
-        #                       ignore_index=MASK_CODE)
         self.BDLoss = DiceLoss(mode='binary',
                                from_logits=True,
                                ignore_index=MASK_CODE)
         # Focal loss
-        # self.FLoss = FocalLoss(mode='multiclass',        # by default, alpha=None, gamma=2.0
-        #                        ignore_index=MASK_CODE)
         self.BFLoss = FocalLoss(mode='binary',           
                                 ignore_index=MASK_CODE)
         
         # l1 loss
         self.L1Loss = nn.L1Loss()
 
+        # multiclass losses
+        if self.use_multicalss_loss:
+            self.DLoss = DiceLoss(mode='multiclass', 
+                                  from_logits=True, 
+                                  ignore_index=MASK_CODE)
+            self.FLoss = FocalLoss(mode='multiclass',        # by default, alpha=None, gamma=2.0
+                                   ignore_index=MASK_CODE)
+            
         return
     
 

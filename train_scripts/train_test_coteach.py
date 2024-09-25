@@ -22,7 +22,7 @@ from sam2.sam2_image_trainer_coteach import SAM2ImageTrainer
 
 # dataset
 from dataset.ssl4eodw_dataset_lmdb import SSL4EODataset, SegAugTransforms
-from dataset.dwosm_dataset_lmdb import DWOSMDataset
+from dataset.lmdb_dataset_dwosm import DWOSMDataset
 import albumentations as A
 
 

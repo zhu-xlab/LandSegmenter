@@ -30,6 +30,7 @@ import albumentations as A
 from sam2.build_sam import build_sam2
 from sam2.modeling.text_simple_tokenizer import SimpleTokenizer
 
+from dataset.datasets_settings import class_names
 
 FINAL_LR = 1e-8
 KEY_IMG = 'image'
@@ -40,7 +41,7 @@ MASK_CODE = 255
 INPUT_SIZE = 1024
 TEXT_PREFIX = 'A photo of '
 
-CLS_DICT = {0:'Water', 1:'Trees', 2:'Grass', 3:'Flooded vegetation', 4:'Crops', 5:'Shrub and Scrub', 6:'Built area', 7:'Bare land', 8:'Ice and Snow'}
+# CLS_DICT = {0:'Water', 1:'Trees', 2:'Grass', 3:'Flooded vegetation', 4:'Crops', 5:'Shrub and Scrub', 6:'Built area', 7:'Bare land', 8:'Ice and Snow'}
 
 
 class SAM2ImageTrainer(pl.LightningModule):
@@ -84,7 +85,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         # others TO BE DEFINED
         self.multimask_output = False
         self.tokenizer = SimpleTokenizer()
-        self.n_prompts = args.n_prompts if type(args.n_prompts)==type([]) else [args.n_prompts]
+        # self.n_prompts = args.n_prompts if type(args.n_prompts)==type([]) else [args.n_prompts]
         # loss weights
         self.wfocal = args.wfocal
         self.wdice = args.wdice
@@ -253,6 +254,9 @@ class SAM2ImageTrainer(pl.LightningModule):
         x = batch[KEY_IMG].contiguous()
         y = batch[KEY_LBL].contiguous()
         waves = batch[KEY_WAVE][0]
+        dataset_name = batch[KEY_DATASAT][0]
+        cls_all = class_names[dataset_name]
+        CLS_DICT = {i:random.choice(cls_all[i]) for i in cls_all}
         # existance GT
         y_exist = torch.zeros((y.shape[0], len(CLS_DICT)), device=self.device)
         for i in range(len(CLS_DICT)):
@@ -301,34 +305,16 @@ class SAM2ImageTrainer(pl.LightningModule):
         return features
     
 
-    def _prepare_prompt(self, class_name_dict, lbl, train_mode=True):
+    def _prepare_prompt(self, class_name_dict, lbl):
         """ Tokenization of string inputs for the model. """
         truncate = False
         context_length = self.model.sam_prompt_encoder.context_length
 
         # generate prompt texts and reprepare labels
         nc_total = len(class_name_dict)
-        if train_mode:
-            n_prompt = random.choice(self.n_prompts)
-            if n_prompt == nc_total:
-                texts = [TEXT_PREFIX+class_name_dict[i] for i in range(nc_total)]
-                gt = lbl
-            else:
-                lbl_classes = torch.unique(lbl).tolist()
-                lbl_classes.remove(255)
-                if n_prompt > len(lbl_classes):
-                    prompt_inds_empty = [i for i in range(nc_total) if i not in lbl_classes]
-                    lbl_classes += random.sample(prompt_inds_empty, n_prompt-len(lbl_classes))
-                prompt_inds = random.sample(lbl_classes, n_prompt)
-                texts = [TEXT_PREFIX+class_name_dict[i] for i in prompt_inds]
-                # prepare labels
-                gt = torch.full_like(lbl, MASK_CODE)
-                for i, ind in enumerate(prompt_inds):
-                    gt[lbl==ind] = i    
-        else:    # validation and test modes taking all the class names
-            n_prompt = nc_total
-            texts = [TEXT_PREFIX+class_name_dict[i] for i in range(nc_total)]
-            gt = lbl
+        n_prompt = nc_total
+        texts = [TEXT_PREFIX+class_name_dict[i] for i in range(nc_total)]
+        gt = lbl
 
         # Tokenization of string inputs for the model
         if isinstance(texts, str):
@@ -440,14 +426,10 @@ class SAM2ImageTrainer(pl.LightningModule):
         return precises, ious
     
 
-    def _get_exist_accuracy(self, exist_pred, y):
-        y_exist = torch.zeros((y.shape[0], len(CLS_DICT)), device=self.device)
-        for i in range(len(CLS_DICT)):
-            ye_ = (y==i).sum(axis=(1,2))
-            y_exist[:,i] = (ye_>0).to(y_exist.dtype)
+    def _get_exist_accuracy(self, exist_pred, y_exist):
         exist_pred = (exist_pred>0).to(y_exist.dtype)
         acc = (exist_pred==y_exist).sum()/y_exist.numel()
-        return acc, y_exist.to(torch.bool)
+        return acc
     
 
     def _log_imgs(self, prefix, x, mask, y):
@@ -487,14 +469,15 @@ class SAM2ImageTrainer(pl.LightningModule):
         
         # ious
         _, ious = self._get_accs(masks.detach(), y)
-        exist_acc, y_exist = self._get_exist_accuracy(existance_predictions.detach(), y)
+        exist_acc = self._get_exist_accuracy(existance_predictions.detach(), y_exist)
+        y_exist = y_exist.to(torch.bool)
         self.log(f'{prefix}{aux_tag}_mious_exist', ious[y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
         self.log(f'{prefix}{aux_tag}_mious_noexist', ious[~y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
         self.log(f'{prefix}{aux_tag}_mious_pred_exist', iou_predictions[y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
         self.log(f'{prefix}{aux_tag}_mious_pred_noexist', iou_predictions[~y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
         self.log(f'{prefix}{aux_tag}_exist_acc', exist_acc, on_epoch=True, on_step=False, sync_dist=True)
         if batch_idx==0 and self.trainer.global_rank==0:
-            for i in range(4):
+            for i in range(1):
                 self._log_imgs(prefix+aux_tag, x[i], masks[i], y[i])
     
 
