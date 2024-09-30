@@ -29,6 +29,23 @@ def get_args_1st_stage():
     return args
 
 
+def get_args_1st_stage_test():
+    parser = argparse.ArgumentParser(description='Test 1st stage models')
+    # data settings
+    parser.add_argument('--dataset_name', type=str, default='dw', help='Name of the test dataset')
+    
+    # get common arguments
+    parser = get_common_args(parser)
+    
+    # initialize arguments
+    args = parser.parse_args()
+
+    # computing environment parameters
+    args = get_device_info(args)
+
+    return args
+
+
 def get_args_dw():
     parser = argparse.ArgumentParser(description='Fine-tune SAM2 with DW data')
     # dataset name
@@ -111,7 +128,7 @@ def get_common_args(parser):
     parser.add_argument('--save_interval', dest='save_inv', type=int, default=10, help='Set the save interval during the training')
     parser.add_argument('--seed', type=int, default=42)
     # for test
-    parser.add_argument('--only_test', action='store_true', default=False, help='Only test models.')
+    parser.add_argument('--test_only', action='store_true', default=False, help='Only test models.')
     parser.add_argument('--test_weight_path', dest='ts_wpath', type=str, default=None, help='Path of test model weights.')
     return parser
 
@@ -199,9 +216,12 @@ def get_device_info(args):
         
     if args.slurm:
         args.nodes = int(os.environ["SLURM_NNODES"])
-        args.devices = int(os.environ["SLURM_TASKS_PER_NODE"])
+        args.devices = int(os.environ["SLURM_TASKS_PER_NODE"].split('(')[0])
         args.current_device = int(os.environ["SLURM_LOCALID"])
         print(f'Slurm found with {args.nodes} nodes, {args.devices} devices per node (current:{args.current_device}).')
+        args.ntasks = int(os.environ["SLURM_NTASKS"])
+        # print(f'Number of tasks: {args.ntasks}')
+        assert args.ntasks == args.nodes * args.devices, 'Number of tasks is not equal to the number of devices!'
     else:    
         args.nodes = 1
         # gpu
@@ -223,9 +243,9 @@ def get_device_info(args):
             print('Using CPU for training!')
             # args.devices = os.cpu_count()
             # print(f'Uising {args.devices} CPU cores for training!')
+        args.ntasks = args.devices
 
-    ndevs = args.nodes * args.devices
-    if ndevs>1: 
+    if args.ntasks>1: 
         args.strategy = 'ddp_find_unused_parameters_true' # if args.use_aux_decoder else 'ddp' 
     else:
         args.strategy = 'auto'

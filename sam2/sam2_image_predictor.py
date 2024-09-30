@@ -136,6 +136,7 @@ class SAM2ImagePredictor:
     def set_image_batch(
         self,
         image_list,  # List[Union[np.ndarray]] or torch.Tensor
+        wave_list=None,  
     ) -> None:
         """
         Calculates the image embeddings for the provided image batch, allowing
@@ -167,7 +168,7 @@ class SAM2ImagePredictor:
             len(img_batch.shape) == 4 and img_batch.shape[1] == 3
         ), f"img_batch must be of size Bx3xHxW, got {img_batch.shape}"
         # print("Computing image embeddings for the provided images...")
-        backbone_out = self.model.forward_image(img_batch)
+        backbone_out = self.model.forward_image(img_batch, wave_list)
         vision_feats = self.model._prepare_backbone_features(backbone_out)
         # Add no_mem_embed, which is added to the lowest rest feat. map during training on videos
         vision_feats[-1] = vision_feats[-1] + self.model.no_mem_embed

@@ -275,9 +275,9 @@ class DWOSMDataset(Dataset):
             lbl_bytes, lbl_shape, lbl_fid = pickle.loads(data_lbl)
             lbl = np.frombuffer(lbl_bytes, dtype=np.uint8).reshape(lbl_shape).copy()
             lbl.setflags(write=True)
-            # remove cloud class
-            if self.lbl_type == 'dw':
-                lbl[lbl==10] = 0
+            # # remove cloud class
+            # if self.lbl_type == 'dw':
+            #     lbl[lbl==10] = 0
             # convert background to 255
             lbl[lbl==0] = 255
             lbl[lbl<255] = lbl[lbl<255] - 1

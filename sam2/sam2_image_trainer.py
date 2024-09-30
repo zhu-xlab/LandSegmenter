@@ -32,7 +32,7 @@ from sam2.modeling.text_simple_tokenizer import SimpleTokenizer
 
 from dataset.datasets_settings import class_names
 
-FINAL_LR = 1e-8
+FINAL_LR = 1e-6
 KEY_IMG = 'image'
 KEY_LBL = 'label'
 KEY_DATASAT = 'dataset'
@@ -98,7 +98,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.schdt = args.schdt
         self.schdv = args.schdv
         self.max_epochs = args.epochs
-        self.n_train_batches = int(args.n_batch_tr/(args.nodes*args.devices))
+        self.n_train_batches = int(args.n_batch_tr/args.ntasks)
         # display interval
         self.display_inv = args.display_inv
 
@@ -108,19 +108,25 @@ class SAM2ImageTrainer(pl.LightningModule):
         # image embeddings
         # print(f'In trainer-forward: waves - {waves}')
         img_feats = self._get_image_embed(x, waves)
-        _, _, h, w = img_feats["image_embed"].shape   # [batch_size, 256, 16, 16]
         # prompt text embeddings
         n_classes = prompt.shape[0]
         text_embeddings = self.model.sam_prompt_encoder(prompt) # [n_prompt, dim] dim=512 (clip dim)
         text_embeddings = self.model.sam_prompt_fn(text_embeddings) # [n_prompt, dim] dim=256
         
+        # decoder forward
+        masks, iou_predictions, precise_predictions, exist_predictions = \
+            self.forward_decoder(img_feats, text_embeddings, n_classes, batch_size, use_aux=use_aux)
+        
+        return masks, iou_predictions, precise_predictions, exist_predictions, img_feats, text_embeddings
+    
+
+    def forward_decoder(self, img_feats, text_embeddings, n_classes, batch_size, use_aux=False):
+        _, _, h, w = img_feats["image_embed"].shape   # [batch_size, 256, 16, 16]
         # noise mask embeddings
         no_noise_mask_embed = self.model.no_noise_mask_embed_aux if use_aux else self.model.no_noise_mask_embed
         noise_mask_embeddings = no_noise_mask_embed.weight.reshape(1, -1, 1, 1).expand(
             n_classes*batch_size, -1, h, w
             )
-        # # # # # DEBUGGING # # # #
-        # print(f'In trainer-forward: noise_mask_embeddings - {noise_mask_embeddings.shape}')
         
         # make predictions
         mask_decoder = self.model.sam_mask_decoder_aux if use_aux else self.model.sam_mask_decoder
@@ -129,9 +135,10 @@ class SAM2ImageTrainer(pl.LightningModule):
             img_feats, text_embeddings, noise_mask_embeddings,
             n_classes, batch_size)
         
-        return masks, iou_predictions, precise_predictions, exist_predictions, img_feats, text_embeddings
+        return masks, iou_predictions, precise_predictions, exist_predictions
+
     
-    def forward_w_mask(self, noise_mask, img_feats, text_embeddings, use_aux=False):
+    def forward_decoder_w_mask(self, noise_mask, img_feats, text_embeddings, use_aux=False):
         n_classes = text_embeddings.shape[0]
         batch_size = noise_mask.shape[0]
         # prepare binary masks
@@ -188,7 +195,7 @@ class SAM2ImageTrainer(pl.LightningModule):
                 if len(self.schdv)>=3:
                     lr_min = self.schdv[2]
                     if len(self.schdv)>3:
-                        print(f'More values than three ({self.schdv}) are provided for cosine annealing scheduler, only the first three ({T_warm, T, lr_min}) are used!')
+                        print(f'More values than two ({self.schdv}) are provided for cosine annealing scheduler, only the first two ({T_warm, T, lr_min}) are used!')
                 else:
                     lr_min = FINAL_LR
                 print(f'Initial LR (={self.lr}) is scheduled by {self.schdt} to reduce to {lr_min} in {T} epochs with a {T_warm}-epoch linear warmup stage.')
@@ -256,7 +263,10 @@ class SAM2ImageTrainer(pl.LightningModule):
         waves = batch[KEY_WAVE][0]
         dataset_name = batch[KEY_DATASAT][0]
         cls_all = class_names[dataset_name]
-        CLS_DICT = {i:random.choice(cls_all[i]) for i in cls_all}
+        if self.trainer.training:
+            CLS_DICT = {i:random.choice(cls_all[i]) for i in cls_all}
+        else:
+            CLS_DICT = {i:cls_all[i][0] for i in cls_all}
         # existance GT
         y_exist = torch.zeros((y.shape[0], len(CLS_DICT)), device=self.device)
         for i in range(len(CLS_DICT)):

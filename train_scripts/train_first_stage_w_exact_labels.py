@@ -66,7 +66,6 @@ def main():
                           A.Rotate(p=0.2),
                           ])
     trans_ts = A.Compose([A.CenterCrop(width=args.patch_size, height=args.patch_size, )])
-                            # interpolation=cv2.INTER_NEAREST),])
 
     # val
     val_dataset = DWOSMDataset(datasets_settings_test['dw']['data_path'],
@@ -81,7 +80,7 @@ def main():
     test_loader = DataLoader(test_dataset, batch_size=args.tbs, num_workers=args.num_workers,
                             pin_memory=True, shuffle=False, drop_last=True)
     # train
-    if (args.nodes * args.devices) > 1:
+    if args.ntasks > 1:
         datasets_tr = get_datasets_train(args.dataset_name, transform=trans_tr)
         class MyDataModule(pl.LightningDataModule):
             def __init__(self, max_dataset_size, num_workers, batch_size=32):
@@ -113,7 +112,7 @@ def main():
         else:
             batch_nums = [min(len(ds), args.max_dataset_size)//args.bs for ds in datasets_tr]
         total_batch_num = sum(batch_nums)
-        batch_num = (total_batch_num // (args.nodes * args.devices)) * (args.nodes * args.devices)
+        batch_num = (total_batch_num // args.ntasks) * (args.ntasks)
     else:
         train_loader, batch_num = load_combined_datasets(args.dataset_name, args.bs, args.num_workers,
                                                          transform=trans_tr, shuffle=True, drop_last=True,
@@ -137,6 +136,7 @@ def main():
     callbacks = [ModelCheckpoint(dirpath = args.checkpoints_dir, every_n_epochs = args.save_inv, 
                                 #  save_weights_only=True, 
                                  save_top_k=-1,  # Save all models
+                                 save_last=True 
                                  )]
     if args.schdt!='none': callbacks += [LearningRateMonitor(logging_interval='epoch')]
     trainer = pl.Trainer(accelerator=args.accelerator,
@@ -149,16 +149,16 @@ def main():
                          logger=wandb_logger,
                          enable_progress_bar=True,
                          callbacks=callbacks,
-                         use_distributed_sampler=((args.nodes * args.devices) == 1),
+                         use_distributed_sampler=(args.ntasks <= 1),
                          )    
     
-    if (args.nodes * args.devices) > 1:
+    if args.ntasks > 1:
         trainer.fit(model, train_loader, ckpt_path=ckpt_path)
     else:
         trainer.fit(model, train_loader, val_loader, ckpt_path=ckpt_path)
 
     # test the model
-    trainer.test(dataloaders=test_loader, verbose=True)
+    trainer.test(model, dataloaders=test_loader, verbose=True)
     
     t1 = datetime.datetime.now().replace(microsecond=0)
     print(f'Training is finished|Total spent time:{t1-t0}!' )

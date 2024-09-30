@@ -11,7 +11,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
 # dataset
-from dataset.dwosm_dataset_lmdb import DWOSMDataset, SegAugTransforms
+from dataset import DWOSMDataset, SegAugTransforms
 import albumentations as A
 from torch.utils.data import DataLoader
 
@@ -25,10 +25,10 @@ KEY_LBL = 'label'
 # KEY_CLSN = 'cn_dict'
 KEY_LBLTYPE = 'label_type'
 MASK_CODE = 255
-INPUT_SIZE = 1024
+INPUT_SIZE = 256
 THRES = 0
 
-CLS_DICT = {0:'Water', 1:'Trees', 2:'Grass', 3:'Flooded vegetation', 4:'Crops', 5:'Shrub and Scrub', 6:'Built area', 7:'Bare land', 8:'Ice and Snow'}
+CLS_DICT = {0:'Water', 1:'Trees', 2:'Grass', 3:'Flooded vegetation', 4:'Crops', 5:'Shrub and Scrub', 6:'Built area', 7:'Bare land', 8:'Ice and Snow', 9:'Clouds'}
 
 
 def get_args():
@@ -68,21 +68,21 @@ def main():
         device = torch.device("cpu")
     
     # datasets
-    trans_ts = A.Compose([A.Resize(width=INPUT_SIZE, height=INPUT_SIZE, interpolation=cv2.INTER_LINEAR),])
+    trans_ts = A.Compose([A.CenterCrop(width=INPUT_SIZE, height=INPUT_SIZE)])
     def get_dataset(data_path, trans=None):
         dataset = DWOSMDataset(data_path, mode=args.it, n_bands=args.n_channels, 
                                transform=trans)
         return dataset
     # test set
     test_dataset = get_dataset(args.test_path, SegAugTransforms(trans_ts))
-    test_dataset2 = get_dataset(args.test_path)
+    # test_dataset2 = get_dataset(args.test_path)
     # dataloader: no matther what devices is used, here directly utilize DataLoader since pl will take of DDP cases
     def get_dataloader(dataset, batch_size, shuffle):
         data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle,
                                  num_workers=args.num_workers, drop_last=False)
         return data_loader
     test_loader = get_dataloader(test_dataset, args.tbs, False)
-    test_loader2 = get_dataloader(test_dataset2, args.tbs, False)
+    # test_loader2 = get_dataloader(test_dataset2, args.tbs, False)
     nc_total = len(CLS_DICT)
     texts = [CLS_DICT[i] for i in range(nc_total)]
 
@@ -92,9 +92,9 @@ def main():
 
     # predict
     pmasks, pious, gts = [], [], []
-    for i, (data, data2) in enumerate(zip(test_loader, test_loader2)):  
+    for i, data in enumerate(test_loader):  
         image = data[KEY_IMG].to(device)
-        gt = data2[KEY_LBL].numpy()
+        gt = data[KEY_LBL].numpy()
         gts.append(gt)
         predictor.set_image_batch(image)
         pred_masks, pred_ious = predictor.predict_batch(texts)

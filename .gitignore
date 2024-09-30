@@ -10,6 +10,6 @@ outputs/*
 checkpoints/*.pt
 checkpoints/*.pth
 *.sh
-srun_outs
+srun_outs*
 Results*
 train_scripts/test_dataloading.py

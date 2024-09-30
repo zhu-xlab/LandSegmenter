@@ -41,6 +41,7 @@ class_names = {
         6: ['Built area', 'Urban area', 'Developed land', 'Residential and commercial zones', 'Infrastructure', 'Built-up land'],
         7: ['Bare land', 'Barren terrain', 'Open soil', 'Unvegetated land', 'Exposed earth'],
         8: ['Ice and Snow', 'Glacial area', 'Snow cover', 'Ice field', 'Frozen surface'],
+        9: ['Clouds', 'Cloud cover', 'Cloudy sky', 'Cloud layer', 'Cloud formation'],
     },
 
     'dynamicearthnet': {
