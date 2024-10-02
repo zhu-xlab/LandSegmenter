@@ -241,6 +241,7 @@ class PromptGenerator(nn.Module):
         self.apply(self._init_weights)
 
         if self.spectralfeat_tune:
+            self.dofa_unfix_weights = dofa_unfix_weights
             self._load_spectral_encoder_checkpoint(dofa_ckpt_path, dofa_unfix_weights)
 
 
@@ -318,40 +319,43 @@ class PromptGenerator(nn.Module):
 
         return handcrafteds
     
-    def init_spectral_feature(self, x, wave_list=None):
-        with torch.no_grad():    
-            # Dictionary to store outputs from specific layers
-            outputs = {}
+    def init_spectral_feature(self, x, wave_list=None):  
+        # Dictionary to store outputs from specific layers
+        outputs = {}
 
-            # Define hook function to capture the output of a layer
-            def get_hook(name):
-                def hook(model, input, output):
-                    outputs[name] = output
-                return hook
+        # Define hook function to capture the output of a layer
+        def get_hook(name):
+            def hook(model, input, output):
+                outputs[name] = output
+            return hook
 
-            # Register hooks for the 1th, 4th, 22th, and 24th layers for vit-large
-            for oi in self.dofa_out_indices:
-                self.dofa.blocks[oi].register_forward_hook(get_hook(f'block_{oi}'))
-            
-            # forward pass
+        # Register hooks for the 1th, 4th, 22th, and 24th layers for vit-large
+        for oi in self.dofa_out_indices:
+            self.dofa.blocks[oi].register_forward_hook(get_hook(f'block_{oi}'))
+        
+        # forward pass
+        if self.dofa_unfix_weights:
             _ = self.dofa(x, wave_list=wave_list)
+        else:
+            with torch.no_grad():
+                _ = self.dofa(x, wave_list=wave_list)
 
-            new_outs = {}
-            for i in range(len(self.stages)):
-                if str(i+1) in self.tuning_stage:
-                    out_ = outputs[f'block_{self.dofa_out_indices[i]}'].detach()[:,1:,:]  # remove cls token
-                    new_outs[str(i+1)] = rearrange(out_, "b (h w) c -> b h w c", h=224//self.dofa_patch_size)
-            # del outputs
-            torch.cuda.empty_cache()
+        new_outs = {}
+        for i in range(len(self.stages)):
+            if str(i+1) in self.tuning_stage:
+                out_ = outputs[f'block_{self.dofa_out_indices[i]}'][:,1:,:]  # remove cls token
+                new_outs[str(i+1)] = rearrange(out_, "b (h w) c -> b h w c", h=224//self.dofa_patch_size)
+        # del outputs
+        torch.cuda.empty_cache()
 
-            # # rearrange outputs
-            # new_outs = self._rearrange_dofa_middle_features(new_outs)            
+        # # rearrange outputs
+        # new_outs = self._rearrange_dofa_middle_features(new_outs)            
 
-            # # reproject to embedding dimensions
-            # for k in new_outs.keys():
-            #     # if k in self.tuning_stage:
-            #     spectralfeat_generator = getattr(self, f'spectralfeat_generator_{k}') # self.spectralfeat_generators[k]
-            #     new_outs[k] = spectralfeat_generator(new_outs[k])
+        # # reproject to embedding dimensions
+        # for k in new_outs.keys():
+        #     # if k in self.tuning_stage:
+        #     spectralfeat_generator = getattr(self, f'spectralfeat_generator_{k}') # self.spectralfeat_generators[k]
+        #     new_outs[k] = spectralfeat_generator(new_outs[k])
 
         return new_outs
 

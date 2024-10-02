@@ -319,22 +319,23 @@ class Hiera(nn.Module):
         return pos_embed
     
     def forward_without_adaptor(self, x: torch.Tensor) -> List[torch.Tensor]:
-        x = x[:, :3] # sam2 only uses RGB channels
-        x = F.interpolate(x, size=(self.sam2_img_size, self.sam2_img_size), mode='bilinear', align_corners=False).contiguous()
-        x = self.patch_embed(x)
-        # x: (B, H, W, C)
+        with torch.no_grad():
+            x = x[:, :3] # sam2 only uses RGB channels
+            x = F.interpolate(x, size=(self.sam2_img_size, self.sam2_img_size), mode='bilinear', align_corners=False).contiguous()
+            x = self.patch_embed(x)
+            # x: (B, H, W, C)
 
-        # Add pos embed
-        x = x + self._get_pos_embed(x.shape[1:3])
+            # Add pos embed
+            x = x + self._get_pos_embed(x.shape[1:3])
 
-        outputs = []
-        for i, blk in enumerate(self.blocks):
-            x = blk(x)
-            if (i == self.stage_ends[-1]) or (
-                i in self.stage_ends and self.return_interm_layers
-            ):
-                feats = x.permute(0, 3, 1, 2)
-                outputs.append(feats)
+            outputs = []
+            for i, blk in enumerate(self.blocks):
+                x = blk(x)
+                if (i == self.stage_ends[-1]) or (
+                    i in self.stage_ends and self.return_interm_layers
+                ):
+                    feats = x.permute(0, 3, 1, 2)
+                    outputs.append(feats)
 
         return outputs
 
@@ -344,9 +345,10 @@ class Hiera(nn.Module):
         x = F.interpolate(x[:, :3], size=(self.sam2_img_size, self.sam2_img_size), mode='bilinear', align_corners=False).contiguous()
 
         # original sam2 part
-        x = self.patch_embed(x)   # x: (B, H, W, C)
-        # Add pos embed
-        x = x + self._get_pos_embed(x.shape[1:3])
+        with torch.no_grad():
+            x = self.patch_embed(x)   # x: (B, H, W, C)
+            # Add pos embed
+            x = x + self._get_pos_embed(x.shape[1:3])
 
         # extract handcrafted features - return dict with key of the stage where the handcrafted features are used
         handcraft_feats = self.prompt_generator.init_handcrafted(inp) 
