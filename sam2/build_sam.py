@@ -18,6 +18,7 @@ def build_sam2(
     ckpt_path_clip=None,
     load_decoder_weights=True,
     test_mode=False,
+    dofa_unfix_weights=False,
     hydra_overrides_extra=[],
     apply_postprocessing=False,
     device=torch.device("cpu"),
@@ -42,7 +43,7 @@ def build_sam2(
         model.eval()
     else:
         _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights)
-        _fix_pretrain_weights(model)
+        _fix_pretrain_weights(model, dofa_unfix_weights)
     return model
 
 
@@ -111,11 +112,14 @@ def _load_checkpoint_test(model, ckpt_path):
         print("Loaded checkpoint sucessfully")
 
 
-def _fix_pretrain_weights(model):
+def _fix_pretrain_weights(model, dofa_unfix_weights=False):
     # fix encoder weights
     for name, param in model.named_parameters():
         if 'image_encoder' in name and 'prompt_generator' not in name:
-            param.requires_grad = False
+            if dofa_unfix_weights:
+                if 'dofa' in name: continue
+            else:
+                param.requires_grad = False
         if 'sam_prompt_encoder' in name:
             param.requires_grad = False
     print('Image and prompt encoder weights are fixed!')

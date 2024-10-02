@@ -73,6 +73,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         if args.mute_adaptor: hydra_overrides_extra += ['++model.image_encoder.trunk.adaptor=None']
         if args.dofa_unfix_weights: hydra_overrides_extra += ['++model.image_encoder.trunk.dofa_unfix_weights=True']
         self.model = build_sam2(args.config_file, args.ckpt_path, args.ckpt_path_clip, args.load_de,
+                                dofa_unfix_weights=args.dofa_unfix_weights, 
                                 hydra_overrides_extra=hydra_overrides_extra)
         # set up the losses: dice and focal
         self.use_multiclass_loss = args.use_multiclass_loss
