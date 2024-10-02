@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader, ConcatDataset
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
-from train_scripts.get_args import get_args_1st_stage as get_args
+from train_scripts.get_args import get_args_1st_stage_train as get_args
 from sam2.sam2_image_trainer import SAM2ImageTrainer
 from sam2.sam2_image_w_auxDe_trainer import SAM2ImageTrainerAux
 
@@ -81,7 +81,8 @@ def main():
                             pin_memory=True, shuffle=False, drop_last=True)
     # train
     if args.ntasks > 1:
-        datasets_tr = get_datasets_train(args.dataset_name, transform=trans_tr)
+        datasets_tr = get_datasets_train(args.dataset_name, transform=trans_tr, 
+                                         subset_proportion=args.subset_proportion, seed=args.seed)
         class MyDataModule(pl.LightningDataModule):
             def __init__(self, max_dataset_size, num_workers, batch_size=32):
                 super().__init__()
@@ -134,7 +135,7 @@ def main():
     ###### 4 - train the model ######
     print('\nStart training...')
     callbacks = [ModelCheckpoint(dirpath = args.checkpoints_dir, every_n_epochs = args.save_inv, 
-                                #  save_weights_only=True, 
+                                #  save_weights_only=True, filename='model_{epoch:02d}_{val_loss:.2f}',
                                  save_top_k=-1,  # Save all models
                                  save_last=True 
                                  )]
@@ -157,8 +158,8 @@ def main():
     else:
         trainer.fit(model, train_loader, val_loader, ckpt_path=ckpt_path)
 
-    # test the model
-    trainer.test(model, dataloaders=test_loader, verbose=True)
+    # # test the model
+    # trainer.test(model, dataloaders=test_loader, verbose=True)
     
     t1 = datetime.datetime.now().replace(microsecond=0)
     print(f'Training is finished|Total spent time:{t1-t0}!' )

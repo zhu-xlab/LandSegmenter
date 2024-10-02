@@ -1,6 +1,7 @@
 import cv2
 import math
 import random
+import numpy as np
 
 import torch
 from torch.utils.data import Sampler, DistributedSampler, DataLoader, ConcatDataset
@@ -138,7 +139,8 @@ class MyDistributedBatchSampler(DistributedSampler):
         return self.num_batches
 
 # load training datasets
-def get_datasets_train(dataset_names, transform=None):
+def get_datasets_train(dataset_names, transform=None, subset_proportion=1, seed=0):
+    if subset_proportion < 1: np.random.seed(seed)
     trans = transform if transform is None else SegAugTransforms(transform)
     datasets_settings = datasets_settings_train
     
@@ -151,22 +153,33 @@ def get_datasets_train(dataset_names, transform=None):
                                    mode=ds_args['mode'], 
                                    n_bands=ds_args['n_channels'], 
                                    transform=trans)
+            if subset_proportion < 1:
+                dataset = get_subset_datasets_train(dataset, subset_proportion)
             datasets.append(dataset)
         elif dname == 'dynamicearthnet':
             ds_args = datasets_settings['dynamicearthnet']
             dataset = DyEarthDataset(ds_args['data_path'],
                                     transform=trans)
+            if subset_proportion < 1:
+                dataset = get_subset_datasets_train(dataset, subset_proportion)
             datasets.append(dataset)
         elif dname == 'openearthmap':
             ds_args = datasets_settings['openearthmap']
             dataset = OpenEarthMapDataset(ds_args['data_path'],
                                           transform=trans)
+            if subset_proportion < 1:
+                dataset = get_subset_datasets_train(dataset, subset_proportion)
             datasets.append(dataset)
         else:
             raise ValueError(f'Invalid dataset name: {dname}')
         # print(f'Loaded {len(dataset)} samples from {dname}.')
     
     return datasets
+
+def get_subset_datasets_train(dataset, subset_proportion=1):
+    n_samples = int(len(dataset) * subset_proportion)
+    dataset = torch.utils.data.Subset(dataset, np.random.choice(len(dataset), n_samples, replace=False))
+    return dataset
 
 # data loader for single node training
 def load_combined_datasets(dataset_names, batch_size, num_workers, transform=None, 

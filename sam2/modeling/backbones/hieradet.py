@@ -210,6 +210,7 @@ class Hiera(nn.Module):
         use_statistical_feats: bool = True,
         dofa_name: str = 'vit_base_patch16_224',
         dofa_ckpt_path: str = None,
+        dofa_unfix_weights: bool = False,
     ):
         super().__init__()
 
@@ -250,8 +251,8 @@ class Hiera(nn.Module):
         # prepare adaptor
         self.embed_dim = embed_dims
         self.stages = stages
-        if adaptor is not None:
-            self.adaptor = adaptor
+        self.adaptor = adaptor if adaptor != 'None' else None
+        if self.adaptor is not None:
             self.adaptor_stage_starts = [0] + \
                 [sum(stages[:i])+1 for i in range(1,len(stages))]
             self.scale_factor = scale_factor
@@ -268,7 +269,7 @@ class Hiera(nn.Module):
                                                     self.input_type, self.freq_nums, self.adaptor,
                                                     self.default_img_size, self.use_statistical_feats,
                                                     self.handcrafted_tune, self.embedding_tune, 
-                                                    self.spectralfeat_tune, dofa_name, dofa_ckpt_path,
+                                                    self.spectralfeat_tune, dofa_name, dofa_ckpt_path, dofa_unfix_weights,
                                                     )
 
         cur_stage = 1
@@ -318,6 +319,7 @@ class Hiera(nn.Module):
         return pos_embed
     
     def forward_without_adaptor(self, x: torch.Tensor) -> List[torch.Tensor]:
+        x = x[:, :3] # sam2 only uses RGB channels
         x = F.interpolate(x, size=(self.sam2_img_size, self.sam2_img_size), mode='bilinear', align_corners=False).contiguous()
         x = self.patch_embed(x)
         # x: (B, H, W, C)

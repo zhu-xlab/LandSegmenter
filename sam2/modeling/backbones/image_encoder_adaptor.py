@@ -146,6 +146,7 @@ class PromptGenerator(nn.Module):
                  spectralfeat_tune=True,       # whether to use and tune spectral features
                  dofa_name='vit_base_patch16', # name of DOFA model  (vit_base_patch16, vit_large_patch16)
                  dofa_ckpt_path=None,          # path to load DOFA checkpoint
+                 dofa_unfix_weights=False,     # whether to unfix DOFA weights
                  ):
         """
         Args:
@@ -240,7 +241,7 @@ class PromptGenerator(nn.Module):
         self.apply(self._init_weights)
 
         if self.spectralfeat_tune:
-            self._load_spectral_encoder_checkpoint(dofa_ckpt_path)
+            self._load_spectral_encoder_checkpoint(dofa_ckpt_path, dofa_unfix_weights)
 
 
     def _init_weights(self, m):
@@ -268,14 +269,15 @@ class PromptGenerator(nn.Module):
         model.norm = torch.nn.Identity()
         return model
     
-    def _load_spectral_encoder_checkpoint(self, dofa_ckpt_path):
+    def _load_spectral_encoder_checkpoint(self, dofa_ckpt_path, dofa_unfix_weights):
         checkpoint = torch.load(dofa_ckpt_path, map_location=torch.device('cpu'))
         missing_keys, _ = self.dofa.load_state_dict(checkpoint, strict=False)
         if missing_keys:
             raise ValueError(f"Missing keys in loading DOFA: {missing_keys}")
         # fix dofa weights
-        for param in self.dofa.parameters():
-            param.requires_grad = False
+        if not dofa_unfix_weights:
+            for param in self.dofa.parameters():
+                param.requires_grad = False
 
     def init_handcrafted(self, x):
         if not self.use_statistical_feats:

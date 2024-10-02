@@ -53,7 +53,11 @@ def main():
     # saving path
     args.pdir = args.ts_wpath.split('checkpoints')[0]
     args.pdir = os.path.join(args.pdir, f'predictions_{args.dataset_name}')
-    if not os.path.exists(args.pdir): os.makedir(args.pdir)
+    if not os.path.exists(args.pdir): 
+        try:
+            os.makedirs(args.pdir)
+        except Exception as inner_e:
+            assert os.path.exists(args.pdir), f'Prediction directory does not exist and cannot be created: {args.pdir}. Error: {inner_e}'
     pred_fname = f'pred_EP{args.ts_wpath.split("epoch=")[-1].split("-")[0]}.h5'
     args.test_save_path = os.path.join(args.pdir, pred_fname)
     
@@ -76,6 +80,7 @@ def main():
                          max_epochs=args.epochs, 
                          check_val_every_n_epoch=args.display_inv,
                          enable_progress_bar=True,
+                         logger=False,
                          )    
 
     # test the model

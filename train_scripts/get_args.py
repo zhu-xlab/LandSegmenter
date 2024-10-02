@@ -7,11 +7,12 @@ import numpy as np
 from pathlib import Path
 
 
-def get_args_1st_stage():
+def get_args_1st_stage_train():
     parser = argparse.ArgumentParser(description='Train SAM2 with exact labels')
     # data settings
     parser.add_argument('--dataset_name', type=str, nargs='*', default=['dw', 'dynamicearthnet', 'openearthmap'], 
                         help='Names of the datasets used for training')
+    parser.add_argument('--subset_proportion', type=float, default=1, help='Proportion of the dataset used for training')
     parser.add_argument('--max_dataset_size', type=int, default=None, help='Maximum number of samples used for training')
 
     # get common arguments
@@ -102,8 +103,10 @@ def get_common_args(parser):
     parser.add_argument('--ckpt-path-clip', type=str, default='checkpoints/RemoteCLIP-ViT-B-32.pt', help='Path to the checkpoint file (clip)') 
     parser.add_argument('--load-decoder-weights', dest='load_de', action='store_true', default=False, help='Whether to load decoder weights or not')
     parser.add_argument('--use-auxiliary-decoder', dest='use_aux_decoder', action='store_true', default=False, help='Whether to use auxiliary decoder (double decoders) or not')
-    parser.add_argument('--dofa-type', type=str, default=None, choices=['vit_base_patch16', 'vit_large_patch16'], help='Type of DoFA model to use. Default is None (not using dofa).')
+    parser.add_argument('--mute-adaptor', action='store_true', default=False, help='Whether to use adaptor or not')
+    parser.add_argument('--dofa-type', type=str, default=None, choices=['vit_base_patch16', 'vit_large_patch16', 'None'], help='Type of DoFA model to use. Default is None (not using dofa).')
     parser.add_argument('--dofa-ckpt-path', type=str, default=None, help='Path to the checkpoint file (dofa)')
+    parser.add_argument('--dofa-unfix-weights', action='store_true', default=False, help='Whether to unfix dofa weights or not')
     parser.add_argument('--resume', type=str, default=False, help='Path of the checkpoint file from which the training is resumed.')
     # device settings
     parser.add_argument('--accelerator', type=str, default='cpu', choices=['cpu','gpu'], help='Type of used accelerator')
@@ -140,14 +143,23 @@ def set_log_files(args):
         dataset_tag = 'exact'
     else:
         dataset_tag = args.dataset_name
-    if args.dofa_type is not None:
-        args.gname = f'FT_dofa{args.dofa_type[4]}{aux}_{dataset_tag}'
+    # adaptor
+    args.use_adaptor = not args.mute_adaptor
+    if args.use_adaptor:
+        if args.dofa_type in [None, 'None']:
+            args.gname = f'FT{aux}_{dataset_tag}'
+        else:
+            dofa_active = 'A' if args.dofa_unfix_weights else ''
+            args.gname = f'FT_dofa{args.dofa_type[4]}{dofa_active}{aux}_{dataset_tag}'
+    else:
+        args.gname = f'FT{aux}_woAd_{dataset_tag}'
 
     # training size
     if dataset_tag == args.dataset_name:
         args.gname += f'_{args.ntr}' if args.ntr>0 else '_all'
     else:
-        args.gname += f'_max{args.max_dataset_size}' if args.max_dataset_size is not None else ''
+        subset = '_sub' if args.subset_proportion<1 else ''
+        args.gname += f'{subset}_max{args.max_dataset_size}' if args.max_dataset_size is not None else ''
 
     # using pretrained decoder or not
     args.gname += '_deI' if args.load_de else '_deN'
@@ -179,7 +191,7 @@ def set_log_files(args):
     
     # saving dirs
     # for test only
-    if args.only_test: 
+    if args.test_only: 
         # parent dir
         if args.ts_wpath is None:
             args.pdir = os.path.join(args.save_dir, args.gname) 

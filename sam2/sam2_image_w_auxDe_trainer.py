@@ -48,7 +48,7 @@ class SAM2ImageTrainerAux(BaseTrainer):
 
         # # # minor forward process to estimate noise mask quality # # # 
         iou_predictions_ano, precise_predictions_ano = \
-            self.forward_w_mask((masks>0).to(y.dtype), img_feats, text_embeddings, use_aux=(not aux))
+            self.forward_decoder_w_mask((masks>0).to(y.dtype), img_feats, text_embeddings, use_aux=(not aux))
         loss_quality = self.L1Loss(iou_predictions_ano[y_exist==1], ious[y_exist==1]).mean() + \
                         self.L1Loss(precise_predictions_ano[y_exist==1], precises[y_exist==1]).mean()
         loss_quality *= n_classes
