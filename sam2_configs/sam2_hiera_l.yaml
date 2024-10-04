@@ -16,7 +16,7 @@ model:
       window_spec: [8, 4, 16, 8]
       # adaptor
       adaptor: adaptor
-      scale_factor: 32
+      scale_factor: 4
       input_type: fft
       prompt_type: highpass
       freq_nums: 0.25

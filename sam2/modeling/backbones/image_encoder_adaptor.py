@@ -126,6 +126,44 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
         # Clamp to ensure it's in the proper range
         tensor.clamp_(min=a, max=b)
         return tensor
+
+
+# # # # attention module # # # #
+class FAM(nn.Module):   # feature attention module
+    def __init__(self, channels, r):
+        super(FAM, self).__init__()
+        self.channels = channels
+        self.r = r
+        self.linear = nn.Sequential(
+            nn.Linear(in_features=self.channels, out_features=self.channels//self.r, bias=True),
+            nn.ReLU(inplace=True),
+            nn.Linear(in_features=self.channels//self.r, out_features=self.channels, bias=True))
+
+    def forward(self, x):
+        x = x.permute(0, 3, 1, 2)
+        max = F.adaptive_max_pool2d(x, output_size=1)
+        avg = F.adaptive_avg_pool2d(x, output_size=1)
+        b, c, _, _ = x.size()
+        linear_max = self.linear(max.view(b,c)).view(b, 1, 1, c)
+        linear_avg = self.linear(avg.view(b,c)).view(b, 1, 1, c)
+        output = linear_max + linear_avg
+        output = F.sigmoid(output)
+        return output
+
+class PAM(nn.Module):  # position attention module
+    def __init__(self, kernel_size=7, bias=False):
+        super(PAM, self).__init__()
+        self.bias = bias
+        self.kernel_size = kernel_size
+        self.conv = nn.Conv2d(in_channels=2, out_channels=1, kernel_size=self.kernel_size, stride=1, padding=3, dilation=1, bias=self.bias)
+
+    def forward(self, x):
+        x = x.permute(0, 3, 1, 2)
+        max = torch.max(x,1)[0].unsqueeze(1)
+        avg = torch.mean(x,1).unsqueeze(1)
+        concat = torch.cat((max,avg), dim=1)
+        output = self.conv(concat)
+        return output.permute(0, 2, 3, 1)
     
 
 # # # # adaptor class # # # #
@@ -185,11 +223,21 @@ class PromptGenerator(nn.Module):
                                                 in_chans=embed_dims[i-1]//scale_factor,
                                                 embed_dim=embed_dims[i]//scale_factor)
                     setattr(self, f'handcrafted_generator_{i+1}', handcrafted_generator)
+                    # attention module
+                    handcrafted_attention = FAM(embed_dims[i]//scale_factor, scale_factor)
+                    setattr(self, f'handcrafted_attention_{i+1}', handcrafted_attention)
+                    handcrafted_pam = PAM()
+                    setattr(self, f'handcrafted_pam_{i+1}', handcrafted_pam)
           
         if self.embedding_tune:
             for i in range(len(self.stages)):
                 embedding_generator = nn.Linear(self.embed_dims[i], self.embed_dims[i] // self.scale_factor)
                 setattr(self, f'embedding_generator_{i+1}', embedding_generator)
+                # attention module
+                embedding_attention = FAM(self.embed_dims[i]//self.scale_factor, self.scale_factor)
+                setattr(self, f'embedding_attention_{i+1}', embedding_attention)
+                embedding_pam = PAM()
+                setattr(self, f'embedding_pam_{i+1}', embedding_pam)
                
         if self.spectralfeat_tune:
             # build dofa
@@ -201,8 +249,21 @@ class PromptGenerator(nn.Module):
             self.dofa = self._build_spectral_encoder()
             # build spectral feature generators
             for i in range(len(self.stages)):
-                spectralfeat_generator = nn.Linear(self.dofa.embed_dim, self.embed_dims[i] // self.scale_factor)
+                final_d = self.embed_dims[i] // self.scale_factor
+                r = math.pow(self.dofa.embed_dim/final_d,1/3)
+                spectralfeat_generator = nn.Sequential(
+                    nn.Linear(self.dofa.embed_dim, int(final_d*r**2)),
+                    nn.GELU(),
+                    nn.Linear(int(final_d*r**2), int(final_d*r)),
+                    nn.GELU(),
+                    nn.Linear(int(final_d*r), final_d)
+                )
                 setattr(self, f'spectralfeat_generator_{i+1}', spectralfeat_generator)
+                # attention module
+                spectralfeat_attention = FAM(final_d, self.scale_factor)
+                setattr(self, f'spectralfeat_attention_{i+1}', spectralfeat_attention)
+                spectralfeat_pam = PAM()
+                setattr(self, f'spectralfeat_pam_{i+1}', spectralfeat_pam)
 
         if self.adaptor == 'adaptor':
             for i in range(len(self.stages)):
@@ -397,11 +458,32 @@ class PromptGenerator(nn.Module):
         feat = 0
         # B, H, W =  prompt[1].shape[0],  prompt[1].shape[1],  prompt[1].shape[2]
         if self.handcrafted_tune:
-            feat += prompt[0]  # .reshape(B, H, W, -1)
+            # feature attention
+            handcrafted_attention = getattr(self, f'handcrafted_attention_{block_num}')
+            hatt = handcrafted_attention(prompt[0])
+            hfeat = hatt*prompt[0]  # .reshape(B, H, W, -1)
+            # position/spatial attention
+            handcrafted_pam = getattr(self, f'handcrafted_pam_{block_num}')
+            hpatt = handcrafted_pam(hfeat)
+            feat += hpatt*hfeat
         if self.embedding_tune:
-            feat += prompt[1]
+            # feature attention
+            embedding_attention = getattr(self, f'embedding_attention_{block_num}')
+            eatt = embedding_attention(prompt[1])
+            efeat = eatt*prompt[1]
+            # position/spatial attention
+            embedding_pam = getattr(self, f'embedding_pam_{block_num}')
+            epatt = embedding_pam(efeat)
+            feat += epatt*efeat
         if self.spectralfeat_tune:
-            feat += prompt[2]
+            # feature attention
+            spectralfeat_attention = getattr(self, f'spectralfeat_attention_{block_num}')
+            satt = spectralfeat_attention(prompt[2])
+            sfeat = satt*prompt[2]
+            # position/spatial attention
+            spectralfeat_pam = getattr(self, f'spectralfeat_pam_{block_num}')
+            spatt = spectralfeat_pam(sfeat)
+            feat += spatt*sfeat
 
         if self.adaptor == 'adaptor':
             lightweight_mlp = getattr(self, f'lightweight_mlp_{block_num}_{depth_num}')

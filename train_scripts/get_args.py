@@ -102,6 +102,7 @@ def get_common_args(parser):
     parser.add_argument('--ckpt-path', type=str, default='checkpoints/sam2_hiera_large.pt', help='Path to the checkpoint file (sam2)')
     parser.add_argument('--ckpt-path-clip', type=str, default='checkpoints/RemoteCLIP-ViT-B-32.pt', help='Path to the checkpoint file (clip)') 
     parser.add_argument('--load-decoder-weights', dest='load_de', action='store_true', default=False, help='Whether to load decoder weights or not')
+    parser.add_argument('--load-aux-decoder-weights', dest='load_aux_de', action='store_true', default=False, help='Whether to load auxiliary decoder weights or not (only used when load_decoder_weights is True)')
     parser.add_argument('--use-auxiliary-decoder', dest='use_aux_decoder', action='store_true', default=False, help='Whether to use auxiliary decoder (double decoders) or not')
     parser.add_argument('--mute-adaptor', action='store_true', default=False, help='Whether to use adaptor or not')
     parser.add_argument('--dofa-type', type=str, default=None, choices=['vit_base_patch16', 'vit_large_patch16', 'None'], help='Type of DoFA model to use. Default is None (not using dofa).')
@@ -138,7 +139,7 @@ def get_common_args(parser):
 
 def set_log_files(args):
     # group name
-    aux = '_aux' if args.use_aux_decoder else ''
+    aux = '_aux_attcp' if args.use_aux_decoder else '_attcp'
     if isinstance(args.dataset_name, list):
         dataset_tag = 'exact'
     else:
@@ -162,7 +163,10 @@ def set_log_files(args):
         args.gname += f'{subset}_max{args.max_dataset_size}' if args.max_dataset_size is not None else ''
 
     # using pretrained decoder or not
-    args.gname += '_deI' if args.load_de else '_deN'
+    if args.load_de:
+        args.gname += '_deIaux' if args.load_aux_de else '_deI'   
+    else:
+        args.gname += '_deN'
     # using multiclass loss or not
     args.gname += '_mcloss' if args.use_multiclass_loss else ''
         

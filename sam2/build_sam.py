@@ -17,6 +17,7 @@ def build_sam2(
     ckpt_path=None,
     ckpt_path_clip=None,
     load_decoder_weights=True,
+    load_aux_decoder_weights=False,
     test_mode=False,
     dofa_unfix_weights=False,
     hydra_overrides_extra=[],
@@ -42,26 +43,37 @@ def build_sam2(
         model = model.to(device)
         model.eval()
     else:
-        _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights)
+        _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights, load_aux_decoder_weights)
         _fix_pretrain_weights(model, dofa_unfix_weights)
     return model
 
 
-def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights):
+def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights, load_aux_decoder_weights=False):
     if ckpt_path is not None:
         sd = torch.load(ckpt_path, map_location="cpu")["model"]
         if load_decoder_weights:
+            # if load_aux_decoder_weights, copy decoder weights to auxiliary decoder weights
+            if load_aux_decoder_weights:
+                # print("size of sd before copying: ", len(sd))
+                sd_ = sd.copy()
+                for k in sd_:
+                    if 'sam_mask_decoder' in k:
+                        k_aux = k.replace("sam_mask_decoder", "sam_mask_decoder_aux")
+                        sd[k_aux] = sd_[k]
+                        # print(f'Copying decoder weights to auxiliary decoder weights: {k} -> {k_aux}')
             # assert not model.use_auxiliary_decoder, "Auxiliary decoder is not supported when load_decoder_weights is True"
             missing_keys, unexpected_keys = model.load_state_dict(sd, strict=False)
+            # print(f'sd size: {len(sd)}, missing_keys: {len(missing_keys)}, unexpected_keys: {len(unexpected_keys)}')
             if missing_keys:
                 # print(missing_keys)
                 for mk in missing_keys:
+                    de_check_str = 'sam_mask_decoder' if load_aux_decoder_weights else 'sam_mask_decoder.' 
                     if (mk.startswith('image_encoder') and 'prompt_generator' not in mk) \
-                          or mk.startswith("sam_mask_decoder.") \
+                          or mk.startswith(de_check_str) \
                             or mk.startswith("no_mem_embed"):
                         if mk.split(".")[1] not in ['existance_prediction_head', 'precise_prediction_head']:
                             raise RuntimeError(f'Unexpected missing key: {mk}')
-            print("Loaded image encoder and decoder weights from SAM2 checkpoint")
+            print(f"Loaded image encoder and decoder weights from SAM2 checkpoint (load_aux_decoder_weights={load_aux_decoder_weights})")
         else:
             sd_new = sd.copy()
             for k in sd:
@@ -118,8 +130,7 @@ def _fix_pretrain_weights(model, dofa_unfix_weights=False):
         if 'image_encoder' in name and 'prompt_generator' not in name:
             if dofa_unfix_weights:
                 if 'dofa' in name: continue
-            else:
-                param.requires_grad = False
+            param.requires_grad = False
         if 'sam_prompt_encoder' in name:
             param.requires_grad = False
     print('Image and prompt encoder weights are fixed!')
