@@ -14,6 +14,7 @@ SCALE = 30
 
 
 def get_nlcd_lc_masks_from_ee(coords, fpdir, image_name, date=2019):  # or layer = landcover
+    if type(date) != int: date = int(date)
     # image
     sensor = image_name.split('_')[0][2:]
     toa_image = ee.Image(f'LANDSAT/LC{sensor}/C02/T1_TOA/{image_name}')
@@ -54,6 +55,7 @@ def get_nlcd_lc_masks_from_ee(coords, fpdir, image_name, date=2019):  # or layer
 
 
 def get_usfs_lc_masks_from_ee(coords, fpdir, image_name, date=2019):   # or layer = Land_Use
+    if type(date) != int: date = int(date)
     # image
     sensor = image_name.split('_')[0][2:]
     toa_image = ee.Image(f'LANDSAT/LC{sensor}/C02/T1_TOA/{image_name}')
@@ -125,7 +127,7 @@ def get_sbtn_lc_masks_from_ee(coords, fpdir, image_name, date=None):
 def worker(args):
     ee.Initialize()
     # lst, save_dir, dataset, date, name_strs = args
-    df, save_dir, dataset, date, name_strs = args
+    df, save_dir, dataset, date = args
     fdir_data = os.path.join(save_dir, 'data')
     n_sam = len(df) # len(lst)
     err_meg, success_meg = [], []
@@ -168,22 +170,19 @@ if __name__ == '__main__':
     # dataset = 'usfs' # 'nlcd'
     # layer = 'Land_Use' # 'impervious'
     # ee.Authenticate(auth_mode='notebook') 
-    n_process = 1
-    save_dir_ = '/p/scratch/hai_ws4eo/liu_ch/data/WeakFT'
+    n_process = 20
+    save_dir_ = '/p/scratch/hai_dm4eo/liu_ch/data/WeakFT'
     
-    for dataset in ['nlcd']:
+    for dataset in ['usfs']:
         if dataset == 'nlcd':
             save_dir = os.path.join(save_dir_, 'nlcd')
             date = 2019
-            name_strs = ['toa', 'sr']
         elif dataset == 'usfs':
             save_dir = os.path.join(save_dir_, 'usfs')
             date = 2023
-            name_strs = ['toa', 'sr']
         elif dataset == 'sbtn':
             save_dir = os.path.join(save_dir_, 'sbtn')
             date = None
-            name_strs = ['toa', 'sr']
         else:
             raise ValueError('Invalid dataset!')
 
@@ -206,7 +205,7 @@ if __name__ == '__main__':
             # sub_lists = separate_list(ids, num_workers)
             sub_dfs = separate_df(df, num_workers)
             # data = [(sub_lists[i], save_dir, dataset, date, name_strs) for i in range(num_workers)]
-            data = [(sub_dfs[i], save_dir, dataset, date, name_strs) for i in range(num_workers)]
+            data = [(sub_dfs[i], save_dir, dataset, date) for i in range(num_workers)]
 
             with multiprocessing.Pool(processes=num_workers) as p:
                 results = p.map(worker, data)
@@ -217,7 +216,7 @@ if __name__ == '__main__':
         else:
             print('No parallel processes are triggered!')
             # r = worker((ids, save_dir, dataset, date, name_strs))
-            r = worker((df, save_dir, dataset, date, name_strs))
+            r = worker((df, save_dir, dataset, date))
             err_meg += r['err_meg']
             success_meg += r['success_meg']
 
@@ -227,7 +226,7 @@ if __name__ == '__main__':
         if len(err_meg)>0:
             df_err = pd.DataFrame(err_meg, columns=['id', 'longitude', 'latitude', 'error'])
             df_err.to_csv(fp_err, index=False)
-            print(f'{dataset}|Error messages are saved at {fp_err} ({len(err_meg)}/{len(ids)} items)')
+            print(f'{dataset}|Error messages are saved at {fp_err} ({len(err_meg)}/{len(df)} items)')
         if len(success_meg)>0:
             if dataset == 'sbtn':
                 column_names = ['id', 'longitude', 'latitude', 'coords', 'org_shapes', 'n_nodata_lc']
@@ -235,6 +234,6 @@ if __name__ == '__main__':
                 column_names = ['id', 'longitude', 'latitude', 'coords', 'org_shapes', 'n_nodata_lc', 'n_nodata_lu']
             df_success = pd.DataFrame(success_meg, columns=column_names)
             df_success.to_csv(fp_success, index=False)
-            print(f'{dataset}|Success messages are saved at {fp_success} ({len(success_meg)}/{len(ids)} items)')
+            print(f'{dataset}|Success messages are saved at {fp_success} ({len(success_meg)}/{len(df)} items)')
 
 

@@ -330,7 +330,7 @@ def get_s12_for_each_split_tif(args):
                 tif_path = os.path.join(fdir, 's2_l2a_origin.tif')
                 save_geotiff(s2_sr.astype(np.uint16), s2_coords, tif_path)
                 name_strs.append('s2_l2a')
-            coords, _ = crop_image_with_rasterio(fdir, name_strs, CROP_SIZE)
+            coords, _ = crop_image_with_rasterio(fdir, name_strs, CROP_SIZE, delete=True)
             success_s2.append([did, s2_imageid, lon, lat, s2_coords, s2_meta['system:crs'], coords, s2_toa.shape])
         else:
             err_s2.append([did, lon, lat, err_msg])
@@ -360,7 +360,7 @@ def get_s12_for_each_split_tif(args):
         # save s1 images
         if s1_success:
             tif_path = os.path.join(fdir, 's1.tif')
-            save_geotiff(s1_image.astype(np.float32), s2_coords, tif_path)
+            save_geotiff(s1_image.astype(np.float32), coords, tif_path)
         
         # # # # 3> get landcover masks from ee
         if s2_success:
@@ -388,9 +388,9 @@ def get_s12_for_each_split_tif(args):
 
 
 if __name__ == '__main__':  
-    n_process = 1
+    n_process = 70
 
-    for dataset in ['Iran', 'worldcover_v100', 'worldcover_v200']:  
+    for dataset in ['worldcover_v200']:  
         save_dir = f'/p/scratch/hai_dm4eo/liu_ch/data/WeakFT/{dataset}'
 
         # # # # # # settings # # # # # #

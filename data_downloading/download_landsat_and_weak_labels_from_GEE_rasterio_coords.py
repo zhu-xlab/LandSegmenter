@@ -179,9 +179,9 @@ def get_data_for_each_split(args):
 
 if __name__ == '__main__':
     # download_mask = True
-    for dataset in ['nlcd', 'usfs', 'sbtn']:  
+    for dataset in ['usfs', 'sbtn', 'nlcd']:  
         t0 = datetime.now().replace(microsecond=0)
-        n_process = 80
+        n_process = 70
         save_dir = f'/p/scratch/hai_dm4eo/liu_ch/data/WeakFT/{dataset}'
 
         # # # # # # settings # # # # # #
