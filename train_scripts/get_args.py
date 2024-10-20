@@ -104,6 +104,7 @@ def get_common_args(parser):
     parser.add_argument('--load-decoder-weights', dest='load_de', action='store_true', default=False, help='Whether to load decoder weights or not')
     parser.add_argument('--load-aux-decoder-weights', dest='load_aux_de', action='store_true', default=False, help='Whether to load auxiliary decoder weights or not (only used when load_decoder_weights is True)')
     parser.add_argument('--use-auxiliary-decoder', dest='use_aux_decoder', action='store_true', default=False, help='Whether to use auxiliary decoder (double decoders) or not')
+    parser.add_argument('--use-noise-mask-loss', action='store_true', default=False, help='Whether to use the mask and eixstance mask on the branch where noise mask is used as input')
     parser.add_argument('--mute-adaptor', action='store_true', default=False, help='Whether to use adaptor or not')
     parser.add_argument('--dofa-type', type=str, default=None, choices=['vit_base_patch16', 'vit_large_patch16', 'None'], help='Type of DoFA model to use. Default is None (not using dofa).')
     parser.add_argument('--dofa-ckpt-path', type=str, default=None, help='Path to the checkpoint file (dofa)')
@@ -139,7 +140,8 @@ def get_common_args(parser):
 
 def set_log_files(args):
     # group name
-    aux = '_aux_attcp' if args.use_aux_decoder else '_attcp'
+    noise_mask_loss_tag = 'l' if args.use_noise_mask_loss else ''
+    aux = f'_aux{noise_mask_loss_tag}_attcp' if args.use_aux_decoder else '_attcp'
     if isinstance(args.dataset_name, list):
         dataset_tag = 'exact'
     else:

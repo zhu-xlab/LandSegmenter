@@ -77,9 +77,6 @@ class SAM2ImageTrainer(pl.LightningModule):
                                 load_aux_decoder_weights=args.load_aux_de,
                                 dofa_unfix_weights=args.dofa_unfix_weights, 
                                 hydra_overrides_extra=hydra_overrides_extra)
-        # set up the losses: dice and focal
-        self.use_multiclass_loss = args.use_multiclass_loss
-        self._set_loss_functions()
 
         # Spatial dim for backbone feature maps
         self._bb_feat_sizes = [
@@ -96,6 +93,9 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.wfocal = args.wfocal
         self.wdice = args.wdice
         self.wiou_no = args.wiou_no
+        # set up the losses: dice and focal
+        self.use_multiclass_loss = args.use_multiclass_loss
+        self._set_loss_functions()
         # self.wunsure = args.winlbl  # incompletely labeled patches are regarded as unsure, assigning a smaller weight
         # optimizer
         self.opt = args.opt
@@ -164,12 +164,12 @@ class SAM2ImageTrainer(pl.LightningModule):
 
         # make predictions
         mask_decoder = self.model.sam_mask_decoder_aux if use_aux else self.model.sam_mask_decoder
-        _, iou_predictions, precise_predictions, _ = self._pred_mask_and_iou(
+        masks, iou_predictions, precise_predictions, exist_predictions = self._pred_mask_and_iou(
             mask_decoder,
             img_feats, text_embeddings, noise_mask_embeddings,
             n_classes, batch_size)
         
-        return iou_predictions, precise_predictions
+        return masks, iou_predictions, precise_predictions, exist_predictions
         
 
     # ------ Optimizer ------ #
@@ -280,7 +280,7 @@ class SAM2ImageTrainer(pl.LightningModule):
             y_exist[:,i] = (ye_>0).to(y_exist.dtype)
         
         # prepare prompt
-        prompt_tokens, y, n_classes = self._prepare_prompt(CLS_DICT, y)
+        prompt_tokens, n_classes = self._prepare_prompt(CLS_DICT, y)
         # lbl_type = batch[KEY_LBLTYPE]  # indicate the type of labels: 0 - gt, 1 - ns
         # assert lbl_type in [0, 1], 'Please provide correct label type (0 - gt, 1 - ns)!'
 
@@ -330,7 +330,6 @@ class SAM2ImageTrainer(pl.LightningModule):
         nc_total = len(class_name_dict)
         n_prompt = nc_total
         texts = [TEXT_PREFIX+class_name_dict[i] for i in range(nc_total)]
-        gt = lbl
 
         # Tokenization of string inputs for the model
         if isinstance(texts, str):
@@ -350,7 +349,7 @@ class SAM2ImageTrainer(pl.LightningModule):
                     raise RuntimeError(f"Input {texts[i]} is too long for context length {context_length}")
             result[i, :len(tokens)] = torch.tensor(tokens, device=lbl.device)
 
-        return result, gt, n_prompt
+        return result, n_prompt
 
 
     def _pred_mask_and_iou(self, decoder, img_feats, text_embeddings, noise_mask_embeddings,

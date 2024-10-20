@@ -10,6 +10,7 @@ class SAM2ImageTrainerAux(BaseTrainer):
         super().__init__(args)
 
         assert self.model.use_auxiliary_decoder, "Model must have an auxiliary decoder."
+        self.use_noise_mask_loss = args.use_noise_mask_loss
         self.test_only = args.test_only
         if self.test_only:
             self.test_save_path = args.test_save_path
@@ -47,13 +48,22 @@ class SAM2ImageTrainerAux(BaseTrainer):
                         )
 
         # # # minor forward process to estimate noise mask quality # # # 
-        iou_predictions_ano, precise_predictions_ano = \
-            self.forward_decoder_w_mask((masks>0).to(y.dtype), img_feats, text_embeddings, use_aux=(not aux))
-        loss_quality = self.L1Loss(iou_predictions_ano[y_exist==1], ious[y_exist==1]).mean() + \
-                        self.L1Loss(precise_predictions_ano[y_exist==1], precises[y_exist==1]).mean()
-        loss_quality *= n_classes
+        if self.use_noise_mask_loss:
+            masks_ano, iou_predictions_ano, precise_predictions_ano, exist_predictions_ano = \
+               self.forward_decoder_w_mask((masks>0).to(y.dtype), img_feats, text_embeddings, use_aux=(not aux))
+            precises_ano, ious_ano = self._get_accs(masks_ano.detach(), y)
+            loss_quality = self._calculate_loss(n_classes, y, y_exist, ious_ano, precises_ano,
+                                                masks_ano, exist_predictions_ano, iou_predictions_ano, precise_predictions_ano,
+                                                from_aux_decoder=(not aux),
+                                                )
+        else:
+            _, iou_predictions_ano, precise_predictions_ano, _ = \
+                self.forward_decoder_w_mask((masks>0).to(y.dtype), img_feats, text_embeddings, use_aux=(not aux))
+            loss_quality = self.L1Loss(iou_predictions_ano[y_exist==1], ious[y_exist==1]).mean() + \
+                            self.L1Loss(precise_predictions_ano[y_exist==1], precises[y_exist==1]).mean()
+            loss_quality *= n_classes
         self.log(f'tr{counter_pref}_loss_qual', loss_quality, on_epoch=True, on_step=False, sync_dist=True)
-        loss += loss_quality*n_classes
+        loss += loss_quality
 
         # training image examples  
         if batch_idx<2 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
@@ -106,9 +116,9 @@ class SAM2ImageTrainerAux(BaseTrainer):
             self.forward_decoder(img_feats, text_embeddings, n_classes, x.shape[0], use_aux=True)
         
         # quality assessment prediction
-        iou_predictions_ano, precise_predictions_ano = \
+        _, iou_predictions_ano, precise_predictions_ano, _ = \
             self.forward_decoder_w_mask((masks>0).to(y.dtype), img_feats, text_embeddings, use_aux=True)
-        iou_predictions_aux_ano, precise_predictions_aux_ano = \
+        _, iou_predictions_aux_ano, precise_predictions_aux_ano, _ = \
             self.forward_decoder_w_mask((masks_aux>0).to(y.dtype), img_feats, text_embeddings, use_aux=False)
         
 
