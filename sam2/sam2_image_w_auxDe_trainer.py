@@ -50,7 +50,7 @@ class SAM2ImageTrainerAux(BaseTrainer):
         # # # minor forward process to estimate noise mask quality # # # 
         if self.use_noise_mask_loss:
             masks_ano, iou_predictions_ano, precise_predictions_ano, exist_predictions_ano = \
-               self.forward_decoder_w_mask((masks>0).to(y.dtype), img_feats, text_embeddings, use_aux=(not aux))
+               self.forward_decoder_w_mask((masks.detach()>0).to(y.dtype), img_feats, text_embeddings, use_aux=(not aux))
             precises_ano, ious_ano = self._get_accs(masks_ano.detach(), y)
             loss_quality = self._calculate_loss(n_classes, y, y_exist, ious_ano, precises_ano,
                                                 masks_ano, exist_predictions_ano, iou_predictions_ano, precise_predictions_ano,
@@ -58,10 +58,10 @@ class SAM2ImageTrainerAux(BaseTrainer):
                                                 )
         else:
             _, iou_predictions_ano, precise_predictions_ano, _ = \
-                self.forward_decoder_w_mask((masks>0).to(y.dtype), img_feats, text_embeddings, use_aux=(not aux))
+                self.forward_decoder_w_mask((masks.detach()>0).to(y.dtype), img_feats, text_embeddings, use_aux=(not aux))
             loss_quality = self.L1Loss(iou_predictions_ano[y_exist==1], ious[y_exist==1]).mean() + \
                             self.L1Loss(precise_predictions_ano[y_exist==1], precises[y_exist==1]).mean()
-            loss_quality *= n_classes
+            loss_quality = loss_quality*n_classes
         self.log(f'tr{counter_pref}_loss_qual', loss_quality, on_epoch=True, on_step=False, sync_dist=True)
         loss += loss_quality
 

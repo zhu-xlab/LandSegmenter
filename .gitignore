@@ -13,3 +13,4 @@ checkpoints/*.pth
 srun_outs*
 Results*
 train_scripts/test_dataloading.py
+test.ipynb

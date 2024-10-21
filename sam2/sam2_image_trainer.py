@@ -92,6 +92,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         # loss weights
         self.wfocal = args.wfocal
         self.wdice = args.wdice
+        self.wce = args.wce
         self.wiou_no = args.wiou_no
         # set up the losses: dice and focal
         self.use_multiclass_loss = args.use_multiclass_loss
@@ -107,6 +108,10 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.n_train_batches = int(args.n_batch_tr/args.ntasks)
         # display interval
         self.display_inv = args.display_inv
+    #     torch.autograd.set_detect_anomaly(True)
+
+    # def on_train_start(self):
+    #     torch.autograd.set_detect_anomaly(True)
 
     # ------ forward propogation ------ #
     def forward(self, x, prompt, waves=None, use_aux=False):  # text prompt: here is the tokenized tensor
@@ -402,7 +407,7 @@ class SAM2ImageTrainer(pl.LightningModule):
     
     def _set_loss_functions(self):
         # Cross Entropy
-        self.BCELoss = nn.BCEWithLogitsLoss(reduction='none')  
+        self.BCELoss = nn.BCEWithLogitsLoss()  
         # Dice
         self.BDLoss = DiceLoss(mode='binary',
                                from_logits=True,
@@ -413,9 +418,11 @@ class SAM2ImageTrainer(pl.LightningModule):
         
         # l1 loss
         self.L1Loss = nn.L1Loss(reduction='none')
+        self.BCELoss_noreduce = nn.BCEWithLogitsLoss(reduction='none') 
 
         # multi-class loss
         if self.use_multiclass_loss:
+            self.CELoss = nn.CrossEntropyLoss(ignore_index=MASK_CODE)
             self.DLoss = DiceLoss(mode='multiclass', 
                                   from_logits=True, 
                                   ignore_index=MASK_CODE)
@@ -503,21 +510,30 @@ class SAM2ImageTrainer(pl.LightningModule):
         # calculate losses 
         loss = torch.tensor(0.0, device=self.device)
         # binary loss
-        for L, w in zip([self.BDLoss, self.BFLoss], [self.wdice, self.wfocal]):
-            for c in range(n_classes):  
-                y_ = (y==c).to(y.dtype)
-                y_[y==MASK_CODE] = MASK_CODE
-                loss_ = w*L(mask_predictions[:,c], y_)
-                loss += loss_
+        for c in range(n_classes):  
+            y_ = torch.where(y == MASK_CODE, MASK_CODE * torch.ones_like(y, dtype=float), (y == c).float()) # (y==c).to(y.dtype)
+            # y_[y==MASK_CODE] = MASK_CODE
+            for L, w, k in zip([self.BDLoss, self.BFLoss, self.BCELoss], [self.wdice, self.wfocal, self.wce], ['dice', 'focal', 'bce']):
+                if w>0:
+                    if k=='bce':
+                        loss_ = w*L(mask_predictions[:,c][y!=MASK_CODE], (y_[y!=MASK_CODE]).float())
+                    else:
+                        loss_ = w*L(mask_predictions[:,c], y_)
+                    loss = loss+loss_
+                else:
+                    continue
         # multi-class loss
         if self.use_multiclass_loss:
-            for L, w in zip([self.DLoss, self.FLoss], [self.wdice, self.wfocal]):
-                loss_ = w*L(mask_predictions, y)
-                loss += loss_
+            for L, w in zip([self.DLoss, self.FLoss, self.CELoss], [self.wdice, self.wfocal, self.wce]):
+                if w>0:
+                    loss_ = w*L(mask_predictions, y.clone())  # otherwise encounter the error: RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.LongTensor [6, 256, 256]] is at version 2; expected version 0 instead.
+                    loss = loss+loss_
+                else:
+                    continue
         self.log(f'tr{aux_tag}_loss_mask', loss, on_epoch=True, on_step=False, sync_dist=True)
         
         # existance loss
-        loss_exist_matrix = self.BCELoss(exist_predictions, y_exist)
+        loss_exist_matrix = self.BCELoss_noreduce(exist_predictions, y_exist)
         # calculate the proportion of labeled pixels to serve as the weights
         y_proportions = ((y!=MASK_CODE).sum(axis=(1,2))/(y.shape[1]*y.shape[2]))[:,None]
         y_proportions = y_proportions.repeat(1, n_classes)
