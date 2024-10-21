@@ -272,7 +272,7 @@ def get_worldcover_lc_masks_from_ee(coords, fpdir, image_name, v):
     feature = lc.toArray().sampleRectangle(region, defaultValue=0)
     image = np.array(feature.getInfo()['properties']['array'])
     org_shapes = image.shape[:2]
-    if image.shape[0]!=H and image.shape[1]!=W:
+    if image.shape[0]!=H or image.shape[1]!=W:
         image = cv2.resize(image.astype(np.uint8), (H,W), interpolation=cv2.INTER_NEAREST)
         image = image[:,:,np.newaxis]
     n_nodata = np.sum(image==0)
