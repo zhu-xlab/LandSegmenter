@@ -255,6 +255,37 @@ def get_iran_lc_masks_from_ee(coords, fpdir, image_name):
     return True, org_shapes, n_nodata
 
 
+def get_ghsl_masks_from_ee(coords, fpdir, image_name):  
+    # image
+    toa_image = ee.Image(f'COPERNICUS/S2_HARMONIZED/{image_name}')
+
+    # s1 collection
+    lc = ee.Image('JRC/GHSL/P2023A/GHS_BUILT_C/2018').select('built_characteristics'). \
+        reproject(toa_image.select('B2').projection()).reproject('EPSG:4326', scale=SCALE)
+
+    # region
+    region = ee.Geometry.Polygon([[coords[0][0], coords[1][1]], 
+                                [coords[1][0], coords[1][1]],
+                                [coords[1][0], coords[0][1]],
+                                [coords[0][0], coords[0][1]],
+                                [coords[0][0], coords[1][1]]]) 
+    feature = lc.toArray().sampleRectangle(region, defaultValue=0)
+    image = np.array(feature.getInfo()['properties']['array'])
+    org_shapes = image.shape[:2]
+    if image.shape[0]!=H or image.shape[1]!=W:
+        image = cv2.resize(image.astype(np.uint8), (CROP_SIZE, CROP_SIZE), interpolation=cv2.INTER_NEAREST)
+        image = image[:,:,np.newaxis]
+    n_nodata = np.sum(image==0)
+    
+    # save tif
+    if n_nodata<H*W:
+        tif_path_lc = os.path.join(fpdir, 'bc.tif') # built characteristics
+        save_geotiff(image.astype(np.uint8), coords, tif_path_lc)
+        return True, org_shapes, n_nodata
+    else:
+        return False, 'All no data'
+
+
 def get_worldcover_lc_masks_from_ee(coords, fpdir, image_name, v):  
     # image
     toa_image = ee.Image(f'COPERNICUS/S2_HARMONIZED/{image_name}')
@@ -370,12 +401,17 @@ def get_s12_for_each_split_tif(args):
                 elif 'worldcover' in dataset:
                     v = dataset.split('_')[-1]
                     outs = get_worldcover_lc_masks_from_ee(coords, fdir, s2_imageid, v)
+                elif dataset == 'ghsl':
+                    outs = get_ghsl_masks_from_ee(coords, fdir, s2_imageid)
             except Exception as e:
                 outs = [False, f"LC Pulling error: {e}"]
         
             if outs[0]:
                 success_lc.append([did, s2_imageid, lon, lat, coords, outs[1], outs[2]])
             else:
+                if outs[1]=='All no data':
+                    # remove the folder
+                    os.system(f'rm -r {fdir}')
                 err_lc.append([did, lon, lat, outs[-1]])
      
     # print fetching results
@@ -388,10 +424,10 @@ def get_s12_for_each_split_tif(args):
 
 
 if __name__ == '__main__':  
-    n_process = 70
+    n_process = 60
 
-    for dataset in ['worldcover_v200']:  
-        save_dir = f'/p/scratch/hai_dm4eo/liu_ch/data/WeakFT/{dataset}'
+    for dataset in ['ghsl']:  
+        save_dir = f'/p/scratch/hai_dm4eo/liu_ch/data/WeakFT/{dataset}_s2c_only'
 
         # # # # # # settings # # # # # #
         if dataset == 'Iran':
@@ -405,7 +441,7 @@ if __name__ == '__main__':
 
             # read center points    
             if get_iran_spots:
-                ssl4eo_dots_csv = '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_downloading/center_coords_ssl4eo_save_order.csv'
+                ssl4eo_dots_csv = '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_preparation/weak_label_downloading/centroids_csv/center_coords_ssl4eo_save_order.csv'
                 iran_shp = '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_downloading/Iran_shp/irn_admbnda_adm0_unhcr_20190514.shp'
                 geo_data = get_overlap_points_iran(ssl4eo_dots_csv, iran_shp, csv_path)
             else:
@@ -414,12 +450,22 @@ if __name__ == '__main__':
         elif dataset in ['worldcover_v100', 'worldcover_v200']:
             get_s2a = True
             # centroids csv
-            csv_path = '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_downloading/centroids_csv/center_coords_subset_worldcover_from_ssl4eo.csv'
+            csv_path = '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_preparation/weak_label_downloading/centroids_csv/center_coords_subset_worldcover_from_ssl4eo.csv'
             geo_data = pd.read_csv(csv_path, header=0)
 
             # date
             START_DATE = '2020' if 'v100' in dataset else '2021'
             END_DATE   = START_DATE
+        
+        elif dataset == 'ghsl':
+            get_s2a = False
+            # centroids csv
+            csv_path = '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_preparation/weak_label_downloading/centroids_csv/center_coords_subset_ghsl_from_ssl4eo.csv'
+            geo_data = pd.read_csv(csv_path, header=0)
+
+            # date
+            START_DATE = '2018'
+            END_DATE   = '2018'
 
         # # # # # # downloading # # # # # #
         print(f'Start fetching data for {dataset}!')
