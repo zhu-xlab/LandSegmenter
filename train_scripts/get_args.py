@@ -120,6 +120,7 @@ def get_common_args(parser):
     parser.add_argument('--focal_loss_weight', dest='wfocal', type=float, default=10.0, help='Weight of focal loss')
     parser.add_argument('--dice_loss_weight', dest='wdice', type=float, default=1.0, help='Weight of dice loss')
     parser.add_argument('--cross_entropy_loss_weight', dest='wce', type=float, default=1.0, help='Weight of cross entropy loss')
+    parser.add_argument('--use_class_weights', action='store_true', default=False, help='Use class weights or not to weight binary losses.')
     parser.add_argument('--iou_no_object_weight', dest='wiou_no', type=float, default=0.5, help='Weight of iou loss for no object')
     parser.add_argument('--use_multiclass_loss', action='store_true', default=False, help='Use multiclass loss or not')
     parser.add_argument('--amp', action='store_false', default=True, help='Use mixed precision or not')
@@ -175,6 +176,7 @@ def set_log_files(args):
         
     # job type
     args.job_type = f'{int(args.wfocal)}F_{int(args.wdice)}D_{int(args.wce)}C' 
+    if args.use_class_weights: args.job_type += '_clsw'
     # lr
     ea = int(np.ceil(np.log10(1/args.lr)))
     eb = int(np.round(args.lr*10**ea))

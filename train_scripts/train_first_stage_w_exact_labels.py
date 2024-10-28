@@ -24,7 +24,7 @@ from sam2.sam2_image_w_auxDe_trainer import SAM2ImageTrainerAux
 # dataset
 from dataset.get_combined_datasets import load_combined_datasets, get_datasets_train, MyDistributedBatchSampler
 from dataset.datasets_settings import datasets_settings_test
-from dataset import DWOSMDataset, OpenEarthMapDataset, SegAugTransforms
+from dataset import DWOSMDataset, OpenEarthMapDataset
 import albumentations as A
 
 
@@ -71,14 +71,14 @@ def main():
     val_dataset = DWOSMDataset(datasets_settings_test['dw']['data_path'],
                                mode=datasets_settings_test['dw']['mode'],
                                n_bands=datasets_settings_test['dw']['n_channels'],
-                               transform=SegAugTransforms(trans_ts))
+                               transform=trans_ts)
     val_loader = DataLoader(val_dataset, batch_size=args.tbs, num_workers=args.num_workers,
                             pin_memory=True, shuffle=False, drop_last=True)
-    # test
-    test_dataset = OpenEarthMapDataset(datasets_settings_test['openearthmap']['data_path'],
-                                       transform=SegAugTransforms(trans_ts))
-    test_loader = DataLoader(test_dataset, batch_size=args.tbs, num_workers=args.num_workers,
-                            pin_memory=True, shuffle=False, drop_last=True)
+    # # test
+    # test_dataset = OpenEarthMapDataset(datasets_settings_test['openearthmap']['data_path'],
+    #                                    transform=SegAugTransforms(trans_ts))
+    # test_loader = DataLoader(test_dataset, batch_size=args.tbs, num_workers=args.num_workers,
+    #                         pin_memory=True, shuffle=False, drop_last=True)
     # train
     if args.ntasks > 1:
         datasets_tr = get_datasets_train(args.dataset_name, transform=trans_tr, 
@@ -93,10 +93,11 @@ def main():
                 # self.transform = transform
 
             def setup(self, stage):
-                self.datasets = datasets_tr # get_datasets_train(self.dataset_names, self.transform)
+                self.datasets, self.split_rates = datasets_tr # get_datasets_train(self.dataset_names, self.transform)
 
             def train_dataloader(self):
-                sampler = MyDistributedBatchSampler(self.datasets, self.max_dataset_size, batch_size=self.batch_size, 
+                sampler = MyDistributedBatchSampler(self.datasets, self.max_dataset_size, self.split_rates,
+                                                    batch_size=self.batch_size, 
                                                     shuffle=True, drop_last=True, seed=args.seed,
                                                     num_replicas=self.trainer.world_size, rank=self.trainer.global_rank)
                 dataset_all = ConcatDataset(self.datasets)
