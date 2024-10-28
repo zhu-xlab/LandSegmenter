@@ -185,6 +185,7 @@ class_names = {
         7: ['herbaceous wetland', 'non-forest wetland'],
         8: ['agricultural land', 'crop', 'cropland', 'arable land and permanent crop', 'herbaceous crop and woody crop', 'annual crop, orchard and vineyard'],
         9: ['urban area including mine, dump and construction site', 'developed area including mine, dump and construction site', 'residential, commercial, industrial and transportation area including mine, dump and construction site', 'built-up area including mine, dump and construction site'],
+        10: ['artificial vegetation', 'non-argricultural vegetation', 'artificial or non-argricultural vegetation'],
     },
 
     'ghsl':{
@@ -277,7 +278,21 @@ class_names = {
 }
 
 
-class_weight = {
+class_weight_list = {
+    'dynamicearthnet': [3.5, 2.8, 1.0, 10.0, 1.3, 3.2, 10.0],
+    'openearthmap': [7.6, 1.0, 1.2, 2.1, 1.1, 3.8, 1.3, 1.2],
+    'iran': [4.5, 10.0, 3.3, 1.0, 10.0, 10.0, 10.0, 6.3, 1.1, 2.1],
+    'worldcover': [1.1, 2.2, 1.1, 1.0, 2.9, 1.5, 10.0, 1.6, 10.0, 10.0, 10.0],
+    'usfs-lc': [1.0, 10.0, 5.1, 10.0, 4.5, 1.8, 7.1, 1.0, 10.0, 4.5, 10.0, 9.2],
+    'usfs-lu': [1.6, 7.0, 1.0, 10.0, 1.0],
+    'nlcd-lc': [6.8, 10.0, 6.4, 10.0, 10.0, 10.0, 10.0, 2.0, 1.5, 4.8, 1.0, 1.3, 3.0, 1.3, 3.7, 9.8],
+    'nlcd-imp': [1.0, 1.7, 10.0],
+    'sbtn': [1.2, 1.1, 6.7, 10.0, 1.4, 10.0, 5.6, 5.5, 1.0, 3.1, 2.3],
+    'ghsl': [1.0, 1.1, 7.1],
+}
+
+
+class_weight_dict = {
     'dynamicearthnet': {
         0: 3.5,
         1: 2.8,

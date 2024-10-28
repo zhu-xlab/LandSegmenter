@@ -78,7 +78,7 @@ class MyBatchSampler(Sampler):
 
 # Define a custom batch sampler for distributed training
 class MyDistributedBatchSampler(DistributedSampler):
-    def __init__(self, datasets, max_dataset_size,
+    def __init__(self, datasets, max_dataset_size, split_rates,
                  num_replicas=None,
                  rank=None, shuffle=True,
                  seed = 0, drop_last = False, batch_size = 10):
@@ -88,6 +88,7 @@ class MyDistributedBatchSampler(DistributedSampler):
         self.n_datasets = len(datasets)
         self.batch_size = batch_size
         self.max_dataset_size = max_dataset_size
+        self.split_rates = split_rates
 
         # Get the number of images and overall indices for each dataset
         self.n_imgs = [len(dataset) for dataset in datasets]
@@ -96,8 +97,9 @@ class MyDistributedBatchSampler(DistributedSampler):
         
         # number of batches
         num_batches_list = []
-        for indice in self.indices:
+        for indice, split_rate in zip(self.indices, self.split_rates):
             n_inds = min(len(indice), self.max_dataset_size) if self.max_dataset_size is not None else len(indice)
+            n_inds = int(n_inds * split_rate)
             if self.drop_last:
                 num_batches_list.append(n_inds // self.batch_size)
             else:
@@ -116,10 +118,10 @@ class MyDistributedBatchSampler(DistributedSampler):
         # chunk the indices
         batches = []
         for i in range(self.n_datasets):
-            if self.max_dataset_size is None:
-                b_ = chunk(self.indices[i], self.batch_size)
-            else:
-                b_ = chunk(self.indices[i][:self.max_dataset_size], self.batch_size)
+            split_rate = self.split_rates[i]
+            n_total = len(self.indices[i]) if self.max_dataset_size is None else min(len(self.indices[i]), self.max_dataset_size)
+            n_split = int(n_total * split_rate)
+            b_ = chunk(self.indices[i][:n_split], self.batch_size)
             if self.drop_last:
                 if len(self.indices[i]) % self.batch_size != 0:
                     b_ = b_[:-1]
@@ -131,7 +133,7 @@ class MyDistributedBatchSampler(DistributedSampler):
             random.shuffle(batches)
 
         batches = batches[:self.total_size]
-        assert len(batches) == self.total_size
+        assert len(batches) == self.total_size, f'Length of batches {len(batches)} is not equal to total size {self.total_size}.'
 
         rank_batches = batches[self.rank:len(batches):self.num_replicas]
         return iter(rank_batches)

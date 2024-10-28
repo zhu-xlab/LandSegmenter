@@ -214,7 +214,8 @@ class DWOSMDataset(Dataset):
         return {KEY_IMG: img, 
                 KEY_LBL: lbl.long(), 
                 KEY_DATASAT: self.lbl_type,
-                KEY_WAVE: waves}
+                KEY_WAVE: waves,
+                KEY_WEAKLBL: False}
     
     def __len__(self):
         return self.length

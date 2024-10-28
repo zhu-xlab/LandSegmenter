@@ -30,7 +30,7 @@ class IranDataset(Dataset):
             else: 
                 assert N<=total_N, f"Requested number of samples {N} is larger than the total number of samples {total_N} in the dataset!"
                 self.length = N        
-                print(f'Use a subset of {N} samples from the dataset.')            
+                # print(f'Use a subset of {N} samples from the dataset.')            
         
         self.transform = SegAugTransforms(transform)
 

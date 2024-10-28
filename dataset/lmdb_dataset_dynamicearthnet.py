@@ -17,6 +17,7 @@ KEY_IMG = 'image'
 KEY_LBL = 'label'
 KEY_DATASAT = 'dataset'
 KEY_WAVE = 'waves'
+KEY_WEAKLBL = 'weak'
 MASK_CODE = 255
 clip_scale = 3
 
@@ -107,7 +108,8 @@ class DyEarthDataset(Dataset):
         return {KEY_IMG: img, 
                 KEY_LBL: lbl.long(), 
                 KEY_DATASAT: 'dynamicearthnet',
-                KEY_WAVE: waves}
+                KEY_WAVE: waves,
+                KEY_WEAKLBL: False}
     
     def __len__(self):
         return self.length
