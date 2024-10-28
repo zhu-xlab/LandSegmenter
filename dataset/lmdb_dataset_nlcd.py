@@ -10,17 +10,17 @@ LBL_KEYS = ['lc', 'imp']
 
 class NLCDDataset(Dataset):
     def __init__(self, lmdb_file=None,
-                 img_mode='toa', n_bands=11, N=-1,
+                 img_mode='toa', n_bands='all', N=-1,
                  transform=None, img_transform=None, img_normalize=True):
         assert img_mode in IMG_KEYS+['rand'], f"Mode {img_mode} is not supported!"
         if img_mode == 'rand':
             assert n_bands in BANDS_SR.keys(), f"Number of bands {n_bands} is not supported for random mode (must be less than 7, the number of SR image)!"
         elif img_mode == 'toa':
-            if n_bands not in list(BANDS_TOA.keys()):
-                n_bands = 11
+            if n_bands == 'all': n_bands = 11
+            if n_bands not in list(BANDS_TOA.keys()): n_bands = 11
         elif img_mode == 'sr':
-            if n_bands not in list(BANDS_SR.keys()):
-                n_bands = 7
+            if n_bands == 'all': n_bands = 7
+            if n_bands not in list(BANDS_SR.keys()): n_bands = 7
         self.n_bands = n_bands
         self.img_mode = img_mode
         self.lmdb_file = lmdb_file

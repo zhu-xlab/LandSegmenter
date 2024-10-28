@@ -3,7 +3,8 @@ import pickle
 import numpy as np
 from torch.utils.data import Dataset
 
-from albumentations.pytorch import ToTensorV2
+# from albumentations.pytorch import ToTensorV2
+from dataset.data_properties_sentinel import SegAugTransforms
 
  
 MEANS = [123.675, 116.28, 103.53] # ImageNet stats 
@@ -32,7 +33,7 @@ def band_clip(band, bi):
 class OpenEarthMapDataset(Dataset):
     def __init__(self, lmdb_file, normalize=True, transform=None):
         self.lmdb_file = lmdb_file
-        self.transform = transform
+        # self.transform = transform
         self.normalize = normalize
         self.n_bands = 3
         
@@ -41,18 +42,19 @@ class OpenEarthMapDataset(Dataset):
         with self.env.begin(write=False) as txn:
             self.length = int(txn.stat()['entries'])
             
-        if self.transform is None:
-            t = ToTensorV2()
-            def base_transform(x):
-                img, lbl = x
-                if lbl.flags['WRITEABLE'] is False:
-                    lbl_writable = np.copy(lbl)
-                    lbl_writable.setflags(write=True)
-                    tens = t(image=img.transpose(1,2,0), mask=lbl_writable)
-                else:
-                    tens = t(image=img.transpose(1,2,0), mask=lbl)
-                return tens['image'], tens['mask']
-            self.transform = base_transform
+        self.transform = SegAugTransforms(transform)
+        # if self.transform is None:
+        #     t = ToTensorV2()
+        #     def base_transform(x):
+        #         img, lbl = x
+        #         if lbl.flags['WRITEABLE'] is False:
+        #             lbl_writable = np.copy(lbl)
+        #             lbl_writable.setflags(write=True)
+        #             tens = t(image=img.transpose(1,2,0), mask=lbl_writable)
+        #         else:
+        #             tens = t(image=img.transpose(1,2,0), mask=lbl)
+        #         return tens['image'], tens['mask']
+        #     self.transform = base_transform
         
 
     def __getitem__(self, index):

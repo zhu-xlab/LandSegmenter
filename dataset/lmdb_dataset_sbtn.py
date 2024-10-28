@@ -8,17 +8,17 @@ from dataset.data_properties_landsat import *
 
 class SBTNDataset(Dataset):
     def __init__(self, lmdb_file=None,
-                 img_mode='toa', n_bands=11, N=-1,
+                 img_mode='toa', n_bands='all', N=-1,
                  transform=None, img_transform=None, img_normalize=True):
         assert img_mode in IMG_KEYS+['rand'], f"Mode {img_mode} is not supported!"
         if img_mode == 'rand':
             assert n_bands in BANDS_SR.keys(), f"Number of bands {n_bands} is not supported for random mode (must be less than 7, the number of SR image)!"
         elif img_mode == 'toa':
-            if n_bands not in list(BANDS_TOA.keys()):
-                n_bands = 11
+            if n_bands == 'all': n_bands = 11
+            if n_bands not in list(BANDS_TOA.keys()): n_bands = 11
         elif img_mode == 'sr':
-            if n_bands not in list(BANDS_SR.keys()):
-                n_bands = 7
+            if n_bands == 'all': n_bands = 7
+            if n_bands not in list(BANDS_SR.keys()): n_bands = 7
         self.n_bands = n_bands
         self.img_mode = img_mode
         self.lmdb_file = lmdb_file
@@ -42,6 +42,7 @@ class SBTNDataset(Dataset):
         # get image data type
         if self.img_mode == 'rand':
             mode = np.random.choice(IMG_KEYS)
+            # print(f"Random mode-{index}: {mode}")
         else:
             mode = self.img_mode
         # get data
@@ -50,12 +51,14 @@ class SBTNDataset(Dataset):
             key_lbl = f'{index}_lc'
             data_lbl = txn.get(key_lbl.encode())
             lbl_bytes, lbl_shape, lbl_fid = pickle.loads(data_lbl)
-            lbl = np.frombuffer(lbl_bytes, dtype=np.uint8).reshape(lbl_shape).copy()
-            lbl.setflags(write=True)
+            lbl_ = np.frombuffer(lbl_bytes, dtype=np.uint8).reshape(lbl_shape).copy()
+            lbl_.setflags(write=True)
             # reset label index
-            lbl = lbl - 2
-            lbl = np.where(lbl<20, lbl, MASK_CODE)
-
+            lbl = np.ones_like(lbl_)*MASK_CODE
+            origin_codes = [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21]
+            target_codes = [0,1,2,3,4,5,6,6,7, 7, 8, 9, 10,10, 2, 6, 6, 7, 7, 4]
+            for i, ind in zip(target_codes, origin_codes):
+                lbl[lbl_==ind] = i
             # read images
             key_s = f'{index}_{mode}'
             data_s = txn.get(key_s.encode())
@@ -87,7 +90,7 @@ class SBTNDataset(Dataset):
 
         return {KEY_IMG: img, 
                 KEY_LBL: lbl.long(), 
-                KEY_DATASAT: 'sbtn',
+                KEY_DATASAT: f'sbtn',
                 KEY_WAVE: waves,
                 KEY_WEAKLBL: True}
     

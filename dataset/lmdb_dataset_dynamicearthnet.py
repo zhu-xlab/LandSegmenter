@@ -4,6 +4,7 @@ import numpy as np
 from torch.utils.data import Dataset
 
 from albumentations.pytorch import ToTensorV2
+from dataset.data_properties_sentinel import SegAugTransforms
 
 
 BANDS = {3: [2,1,0], 
@@ -41,7 +42,7 @@ class DyEarthDataset(Dataset):
             n_bands = 4
         self.n_bands = n_bands
         self.lmdb_file = lmdb_file
-        self.transform = transform
+        # self.transform = transform
         self.normalize = normalize
         self.timestamp = timestamp
         self.all_timestamps = [0,1,2,3,4,5]
@@ -51,20 +52,20 @@ class DyEarthDataset(Dataset):
         with self.env.begin(write=False) as txn:
             # bsname = os.path.basename(os.path.normpath(self.lmdb_file))
             self.length = int(txn.stat()['entries'])//6
-            
-        if self.transform is None:
-            t = ToTensorV2()
-            def base_transform(x):
-                img, lbl = x
-                if lbl.flags['WRITEABLE'] is False:
-                    lbl_writable = np.copy(lbl)
-                    lbl_writable.setflags(write=True)
-                    tens = t(image=img.transpose(1,2,0), mask=lbl_writable)
-                else:
-                    tens = t(image=img.transpose(1,2,0), mask=lbl)
-                return tens['image'], tens['mask']
-            self.transform = base_transform
         
+        self.transform = SegAugTransforms(transform)
+        # if self.transform is None:
+        #     t = ToTensorV2()
+        #     def base_transform(x):
+        #         img, lbl = x
+        #         if lbl.flags['WRITEABLE'] is False:
+        #             lbl_writable = np.copy(lbl)
+        #             lbl_writable.setflags(write=True)
+        #             tens = t(image=img.transpose(1,2,0), mask=lbl_writable)
+        #         else:
+        #             tens = t(image=img.transpose(1,2,0), mask=lbl)
+        #         return tens['image'], tens['mask']
+        #     self.transform = base_transform
 
     def __getitem__(self, index):
         # get data

@@ -9,17 +9,17 @@ LBL_KEYS = ['lc', 'lu']
 
 class USFSDataset(Dataset):
     def __init__(self, lmdb_file=None,
-                 img_mode='toa', n_bands=11, N=-1,
+                 img_mode='toa', n_bands='all', N=-1,
                  transform=None, img_transform=None, img_normalize=True):
         assert img_mode in IMG_KEYS+['rand'], f"Mode {img_mode} is not supported!"
         if img_mode == 'rand':
             assert n_bands in BANDS_SR.keys(), f"Number of bands {n_bands} is not supported for random mode (must be less than 7, the number of SR image)!"
         elif img_mode == 'toa':
-            if n_bands not in list(BANDS_TOA.keys()):
-                n_bands = 11
+            if n_bands == 'all': n_bands = 11
+            if n_bands not in list(BANDS_TOA.keys()): n_bands = 11
         elif img_mode == 'sr':
-            if n_bands not in list(BANDS_SR.keys()):
-                n_bands = 7
+            if n_bands == 'all': n_bands = 7
+            if n_bands not in list(BANDS_SR.keys()): n_bands = 7
         self.n_bands = n_bands
         self.img_mode = img_mode
         self.lmdb_file = lmdb_file
@@ -58,16 +58,17 @@ class USFSDataset(Dataset):
                 lbl.setflags(write=True)
                 # reset label index
                 if lbl_mode == 'lc':
-                    # original: [ 1  3  4  5  7  8  9 10 11 12 13 14 15]
+                    # original: [ 1  3  4  5  7  8  9 10 11 12 13 14 15]  15: non-processing area mask
                     # new:      [ 0  1  2  3  4  5  6  7  8  9 10 11 12]
                     lbl = np.where(lbl>1, lbl-2, lbl-1)
                     lbl = np.where(lbl>4, lbl-1, lbl)
-                    lbl[lbl>12] = MASK_CODE
+                    lbl[lbl>11] = MASK_CODE
                 if lbl_mode == 'lu':
                     # original: [ 1  2  3  4  5  6  7]
-                    # new:      [ 0  1  2  3  4  5  6]
-                    lbl = lbl-1 
-                    lbl[lbl>6] = MASK_CODE
+                    # new:      [ 0  1  2  3 255 4 255]
+                    lbl[lbl==5] = 7
+                    lbl = np.where(lbl>5, lbl-2, lbl-1) 
+                    lbl[lbl>4] = MASK_CODE
                 lbls.append(lbl)
                     
             # read images

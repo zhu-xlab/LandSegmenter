@@ -1,17 +1,15 @@
 import pickle
 import numpy as np
-from fastai.vision.all import *
-from albumentations.pytorch import ToTensorV2
 from torch.utils.data import Dataset
 import lmdb
 
 from dataset.data_properties_sentinel import *
 
-key_prefs = ['s2_l1c', 'lc']
 
 class IranDataset(Dataset):
     def __init__(self, lmdb_file, mode='s2_l1c', n_bands=13, N=-1,
                  transform=None, s2_transform=None, s2_normalize=True):
+        assert mode=='s2_l1c', f"Mode {mode} is not supported for Iran dataset! (only 's2_l1c' is supported)"
         if n_bands not in list(BANDS.keys()):
             n_bands = 13
         self.n_bands = n_bands
@@ -45,8 +43,14 @@ class IranDataset(Dataset):
             lbl_bytes, lbl_shape, lbl_fid = pickle.loads(data_lbl)
             lbl = np.frombuffer(lbl_bytes, dtype=np.uint8).reshape(lbl_shape).copy()
             lbl.setflags(write=True)
-            # convert background to 255
-            lbl = lbl - 1
+            # [merge 4,7,9,10] barren land except for salty land and sand ; bare land except for salty land and sand ; rock, clay and soil except for salty land 
+            for i in [7,9,10]:
+                lbl[lbl==i] = 4
+            # rearrange labels
+            lbl = lbl-1
+            for i, ind in enumerate([0,1,2,3,4,5,7,10,11,12]):
+                if i != ind:
+                    lbl[lbl==ind] = i       
             # read images
             key_s = f'{index}_{self.mode}'
             data_s = txn.get(key_s.encode())
@@ -81,7 +85,8 @@ class IranDataset(Dataset):
         return {KEY_IMG: img, 
                 KEY_LBL: lbl.long(), 
                 KEY_DATASAT: 'iran',
-                KEY_WAVE: waves}
+                KEY_WAVE: waves,
+                KEY_WEAKLBL: True}
     
     def __len__(self):
         return self.length

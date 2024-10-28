@@ -6,7 +6,7 @@ import albumentations as A
 
 IMG_KEYS = ['toa', 'sr']
 SDTYPE = {'toa':np.float32, 'sr':np.uint16}
-IMG_CLIP = False
+IMG_CLIP = True
 IMG_CLIP_SCALE = 3
 
 TOA_MEAN = [0.139721155, 0.125081092, 0.123868674, 0.131810322, 0.283200920, 0.246309161,

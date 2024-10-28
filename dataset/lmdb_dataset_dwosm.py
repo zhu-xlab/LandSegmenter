@@ -9,53 +9,10 @@ import os
 import random
 import pickle
 import numpy as np
-import albumentations as A
-from fastai.vision.all import *
-from albumentations.pytorch import ToTensorV2
+
 from torch.utils.data import Dataset, DataLoader, random_split
 import lmdb, torch
-
-# import matplotlib as mpl
-# import matplotlib.pyplot as plt
-
-### band statistics: mean & std
-# calculated from 50k subset
-S1_MEAN = [-12.54847273, -20.19237134]
-S1_STD = [5.25697717, 5.91150917]
-
-S2A_MEAN = [752.40087073, 884.29673756, 1144.16202635, 1297.47289228, 1624.90992062, 2194.6423161, 2422.21248945, 2517.76053101, 2581.64687018, 2645.51888987, 2368.51236873, 1805.06846033]
-S2A_STD = [1108.02887453, 1155.15170768, 1183.6292542, 1368.11351514, 1370.265037, 1355.55390699, 1416.51487101, 1474.78900051, 1439.3086061, 1582.28010962, 1455.52084939, 1343.48379601]
-
-S2C_MEAN = [1605.57504906, 1390.78157673, 1314.8729939, 1363.52445545, 1549.44374991, 2091.74883118, 2371.7172463, 2299.90463006, 2560.29504086, 830.06605044, 22.10351321, 2177.07172323, 1524.06546312]
-S2C_STD = [786.78685367, 850.34818441, 875.06484736, 1138.84957046, 1122.17775652, 1161.59187054, 1274.39184232, 1248.42891965, 1345.52684884, 577.31607053, 51.15431158, 1336.09932639, 1136.53823676]
-
-BANDS ={3:  [3,2,1],
-        4:  [3,2,1,8],  # 8: nir band
-        9:  [3,2,1,4,5,6,7,11,12], # satlas/dofa bands
-        10: [3,2,1,4,5,6,7,8,11,12],
-        12: [3,2,1,0,4,5,6,7,8,9,11,12], # remove B10 - cirrus band
-        13: [3,2,1,0,4,5,6,7,8,9,10,11,12]}
-
-WAVELENS_S2 = np.array([0.443, 0.490, 0.56, 0.665, 0.705, 0.740, 0.783, 0.842, 0.865, 0.940, 1.375, 1.61, 2.19])
-WAVELENS_S1 = np.array([3.75, 3.75])
-
-SDTYPE = {1:np.float32, 2:np.uint16}
-
-CLS_DICT = {0:'Water', 1:'Trees', 2:'Grass', 3:'Flooded vegetation', 4:'Crops', 5:'Shrub and Scrub', 6:'Built area', 7:'Bare land', 8:'Ice and Snow'}
-            
-KEY_IMG = 'image'
-KEY_LBL = 'label'
-KEY_DATASAT = 'dataset'
-KEY_WAVE = 'waves'
-MASK_CODE = 255
-
-# band-wise data clip
-def img_clip(img, mean, std, scale=2):
-    min_value = mean - scale * std
-    max_value = mean + scale * std
-    img = (img - min_value) / (max_value - min_value) * 255.0
-    img = np.clip(img, 0, 255).astype(np.uint8)
-    return img
+from dataset.data_properties_sentinel import *
 
 
 # s1 - SAR image data clip
@@ -92,85 +49,11 @@ def data_normalize_s1(img):
     return img_new
 
 
-def data_normalize_s2(img):
-    # get band info
-    n_bands = img.shape[0]
-    band_ids = BANDS[n_bands]
-    
-    # data normalize
-    img_new = []
-    for b in range(n_bands):
-        img0 = single_band_normalize(img[b], S2C_MEAN[band_ids[b]], S2C_STD[band_ids[b]], clip=False)
-        img_new.append(img0[None])
-    
-    # concatenate
-    img_new = np.concatenate(img_new, axis=0)
-    return img_new
-
-
 def s1_exclude_outliers(img, head_rate=1, tail_rate=99):
     head = np.percentile(img, head_rate)
     tail = np.percentile(img, tail_rate, axis=(0, 1))
     img = np.clip(img, head, tail)
     return img
-    
-    
-def single_band_normalize(img, mean, std, clip=False):
-    if clip:
-        scale = 3
-        min_value = mean - scale * std
-        max_value = mean + scale * std
-        img = np.clip(img, min_value, max_value)
-    img = (img-mean)/std
-    return img
-
-
-# s2 - MS image data clip
-def data_clip_s2(img):
-    img = img.astype(np.float32)
-    
-    # get band info
-    n_bands = img.shape[0]
-    band_ids = BANDS[n_bands]
-    
-    # data clip
-    img_new = []
-    for b in range(n_bands):
-        bi = band_ids[b]
-        img0 = img[b]
-        img0 = img_clip(img0, S2C_MEAN[bi], S2C_STD[bi])
-        img_new.append(img0[None])
-    
-    # concatenate
-    img_new = np.concatenate(img_new, axis=0)
-    return img_new
-    
-
-# /10000 normalization
-def normalize_s2(img):
-    img = img.astype(np.float32)
-    
-    # get band info
-    n_bands = img.shape[0]
-    # band_ids = BANDS[n_bands]
-    
-    # normalize band by band
-    img_new = []
-    for b in range(n_bands):
-        im = img[b]
-        
-        # # normalize
-        im /= 10000.0
-        im = np.clip(im, 0, 1)
-        
-        # concatenate
-        img_new.append(im[None])
-    
-    # concatenate
-    img_new = np.concatenate(img_new, axis=0)
-    # print(img_new.shape, img_new.dtype, img_new.min(), img_new.max())
-    
-    return img_new
                 
 
 # get subset of given dataset    
@@ -233,7 +116,7 @@ class DWOSMDataset(Dataset):
         self.lbl_type = lbl_type
         self.mode = mode
         self.lmdb_file = lmdb_file
-        self.transform = transform
+        # self.transform = transform
         self.s1_transform = s1_transform
         self.s2_transform = s2_transform
         self.s1_normalize = s1_normalize
@@ -249,19 +132,8 @@ class DWOSMDataset(Dataset):
             else: 
                 self.length = int(txn.stat()['entries']/3)                    
         
-        if self.transform is None:
-            t = ToTensorV2()
-            def base_transform(x):
-                img, lbl = x
-                if lbl.flags['WRITEABLE'] is False:
-                    lbl_writable = np.copy(lbl)
-                    lbl_writable.setflags(write=True)
-                    tens = t(image=img.transpose(1,2,0), mask=lbl_writable)
-                else:
-                    tens = t(image=img.transpose(1,2,0), mask=lbl)
-                return tens['image'], tens['mask']
-            self.transform = base_transform
-        
+        self.transform = SegAugTransforms(transform)
+
 
     def __getitem__(self, index):
         # get data
@@ -346,24 +218,6 @@ class DWOSMDataset(Dataset):
     
     def __len__(self):
         return self.length
-    
-
-# augmentation class for (img,label) pairs
-class SegAugTransforms(ItemTransform):
-    def __init__(self, aug): 
-        self.aug = aug
-        self.ToTensor = ToTensorV2()
-    def encodes(self, x):
-        img, lbl = x
-        # for albumentations to work correctly, the channels must be at the last dimension
-        data_aug = self.aug(image=img.transpose(1,2,0), mask=lbl)
-        if data_aug['mask'].flags['WRITEABLE'] is False:
-            lbl_writable = np.copy(data_aug['mask'])
-            lbl_writable.setflags(write=True)
-        else: 
-            lbl_writable = data_aug['mask']
-        tens = self.ToTensor(image=data_aug['image'], mask=lbl_writable)
-        return tens['image'], tens['mask']
     
     
 if __name__ == '__main__':
