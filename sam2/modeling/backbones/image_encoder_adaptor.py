@@ -130,38 +130,56 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
 
 # # # # attention module # # # #
 class FAM(nn.Module):   # feature attention module
-    def __init__(self, channels, r):
+    def __init__(self, channels, r, channels_combine=0):
         super(FAM, self).__init__()
-        self.channels = channels
+        self.in_channels = channels+channels_combine
         self.r = r
+        self.channels = channels
         self.linear = nn.Sequential(
+            nn.Linear(in_features=self.in_channels, out_features=self.channels, bias=True),
+            nn.ReLU(inplace=True),
             nn.Linear(in_features=self.channels, out_features=self.channels//self.r, bias=True),
             nn.ReLU(inplace=True),
             nn.Linear(in_features=self.channels//self.r, out_features=self.channels, bias=True))
 
-    def forward(self, x):
+    def forward(self, x, x_combine=None):
         x = x.permute(0, 3, 1, 2)
-        max = F.adaptive_max_pool2d(x, output_size=1)
-        avg = F.adaptive_avg_pool2d(x, output_size=1)
-        b, c, _, _ = x.size()
-        linear_max = self.linear(max.view(b,c)).view(b, 1, 1, c)
-        linear_avg = self.linear(avg.view(b,c)).view(b, 1, 1, c)
+        b, _, _, _ = x.size()
+        max = F.adaptive_max_pool2d(x, output_size=1).view(b,-1)
+        avg = F.adaptive_avg_pool2d(x, output_size=1).view(b,-1)
+        if self.in_channels > self.channels:
+            x_combine = x_combine.permute(0, 3, 1, 2)
+            max_combine = F.adaptive_max_pool2d(x_combine, output_size=1).view(b, -1)
+            avg_combine = F.adaptive_avg_pool2d(x_combine, output_size=1).view(b, -1)
+            max = torch.cat((max, max_combine), dim=1)
+            avg = torch.cat((avg, avg_combine), dim=1)
+        linear_max = self.linear(max).view(b, 1, 1, -1)
+        linear_avg = self.linear(avg).view(b, 1, 1, -1)
         output = linear_max + linear_avg
         output = F.sigmoid(output)
         return output
 
 class PAM(nn.Module):  # position attention module
-    def __init__(self, kernel_size=7, bias=False):
+    def __init__(self, kernel_size=7, bias=False, use_combine=False):
         super(PAM, self).__init__()
         self.bias = bias
         self.kernel_size = kernel_size
-        self.conv = nn.Conv2d(in_channels=2, out_channels=1, kernel_size=self.kernel_size, stride=1, padding=3, dilation=1, bias=self.bias)
+        self.use_combine = use_combine
+        in_channels = 4 if use_combine else 2
+        self.conv = nn.Conv2d(in_channels=in_channels, out_channels=1, kernel_size=self.kernel_size, stride=1, padding=3, dilation=1, bias=self.bias)
 
-    def forward(self, x):
+    def forward(self, x, x_combine=None):
         x = x.permute(0, 3, 1, 2)
         max = torch.max(x,1)[0].unsqueeze(1)
         avg = torch.mean(x,1).unsqueeze(1)
-        concat = torch.cat((max,avg), dim=1)
+        if self.use_combine:
+            assert x_combine is not None, "x_combine is None while in_channels > 0!"
+            x_combine = x_combine.permute(0, 3, 1, 2)
+            max_combine = torch.max(x_combine,1)[0].unsqueeze(1)
+            avg_combine = torch.mean(x_combine,1).unsqueeze(1)
+            concat = torch.cat((max,avg,max_combine,avg_combine), dim=1)
+        else:
+            concat = torch.cat((max,avg), dim=1)
         output = self.conv(concat)
         return output.permute(0, 2, 3, 1)
     
@@ -210,6 +228,7 @@ class PromptGenerator(nn.Module):
         if self.input_type == 'all':
             self.prompt = nn.Parameter(torch.zeros(3, img_size, img_size), requires_grad=False)
 
+        # n_feat_types = sum([self.handcrafted_tune, self.embedding_tune, self.spectralfeat_tune])
         if self.handcrafted_tune:
             for i in range(len(self.stages)):
                 if str(i+1) in self.tuning_stage:
@@ -224,7 +243,8 @@ class PromptGenerator(nn.Module):
                                                 embed_dim=embed_dims[i]//scale_factor)
                     setattr(self, f'handcrafted_generator_{i+1}', handcrafted_generator)
                     # attention module
-                    handcrafted_attention = FAM(embed_dims[i]//scale_factor, scale_factor)
+                    handcrafted_attention = FAM(embed_dims[i]//scale_factor, scale_factor,
+                                                channels_combine=embed_dims[i]//scale_factor)
                     setattr(self, f'handcrafted_attention_{i+1}', handcrafted_attention)
                     handcrafted_pam = PAM()
                     setattr(self, f'handcrafted_pam_{i+1}', handcrafted_pam)
@@ -234,7 +254,8 @@ class PromptGenerator(nn.Module):
                 embedding_generator = nn.Linear(self.embed_dims[i], self.embed_dims[i] // self.scale_factor)
                 setattr(self, f'embedding_generator_{i+1}', embedding_generator)
                 # attention module
-                embedding_attention = FAM(self.embed_dims[i]//self.scale_factor, self.scale_factor)
+                embedding_attention = FAM(self.embed_dims[i]//self.scale_factor, self.scale_factor,
+                                          channels_combine=self.embed_dims[i]//self.scale_factor)
                 setattr(self, f'embedding_attention_{i+1}', embedding_attention)
                 embedding_pam = PAM()
                 setattr(self, f'embedding_pam_{i+1}', embedding_pam)
@@ -260,7 +281,8 @@ class PromptGenerator(nn.Module):
                 )
                 setattr(self, f'spectralfeat_generator_{i+1}', spectralfeat_generator)
                 # attention module
-                spectralfeat_attention = FAM(final_d, self.scale_factor)
+                spectralfeat_attention = FAM(final_d, self.scale_factor,
+                                             channels_combine=final_d)
                 setattr(self, f'spectralfeat_attention_{i+1}', spectralfeat_attention)
                 spectralfeat_pam = PAM()
                 setattr(self, f'spectralfeat_pam_{i+1}', spectralfeat_pam)
@@ -455,12 +477,13 @@ class PromptGenerator(nn.Module):
             return handcrafted_feature, embedding_feature
 
     def get_prompt(self, x, prompt, block_num, depth_num):
+        concat_prompt = torch.stack(prompt, dim=-1).sum(dim=-1)
         feat = 0
         # B, H, W =  prompt[1].shape[0],  prompt[1].shape[1],  prompt[1].shape[2]
         if self.handcrafted_tune:
             # feature attention
             handcrafted_attention = getattr(self, f'handcrafted_attention_{block_num}')
-            hatt = handcrafted_attention(prompt[0])
+            hatt = handcrafted_attention(prompt[0], concat_prompt)
             hfeat = hatt*prompt[0]  # .reshape(B, H, W, -1)
             # position/spatial attention
             handcrafted_pam = getattr(self, f'handcrafted_pam_{block_num}')
@@ -469,7 +492,7 @@ class PromptGenerator(nn.Module):
         if self.embedding_tune:
             # feature attention
             embedding_attention = getattr(self, f'embedding_attention_{block_num}')
-            eatt = embedding_attention(prompt[1])
+            eatt = embedding_attention(prompt[1], concat_prompt)
             efeat = eatt*prompt[1]
             # position/spatial attention
             embedding_pam = getattr(self, f'embedding_pam_{block_num}')
@@ -478,7 +501,7 @@ class PromptGenerator(nn.Module):
         if self.spectralfeat_tune:
             # feature attention
             spectralfeat_attention = getattr(self, f'spectralfeat_attention_{block_num}')
-            satt = spectralfeat_attention(prompt[2])
+            satt = spectralfeat_attention(prompt[2], concat_prompt)
             sfeat = satt*prompt[2]
             # position/spatial attention
             spectralfeat_pam = getattr(self, f'spectralfeat_pam_{block_num}')
