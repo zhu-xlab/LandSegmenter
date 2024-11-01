@@ -276,9 +276,11 @@ def get_subset_datasets_train(dataset, subset_proportion=1):
 
 # data loader for single node training
 def load_combined_datasets(dataset_names, batch_size, num_workers, transform=None, 
-                           shuffle=True, drop_last=True, max_dataset_size=None):
+                           shuffle=True, drop_last=True, 
+                           subset_proportion=1, max_dataset_size=None):
     # load datasets
-    datasets, split_rates = get_datasets_train(dataset_names, transform=transform)
+    datasets, split_rates = get_datasets_train(dataset_names, transform=transform,
+                                               subset_proportion=subset_proportion)
     dataset_all = ConcatDataset(datasets)
 
     # sampler
