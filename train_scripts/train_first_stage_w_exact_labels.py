@@ -1,9 +1,6 @@
 import datetime
 import os
 import sys
-import cv2
-import numpy as np
-import random 
 
 # appending self-defined package path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -72,6 +69,7 @@ def main():
                                mode=datasets_settings_test['dw']['mode'],
                                n_bands=datasets_settings_test['dw']['n_channels'],
                                transform=trans_ts)
+    val_dataset = torch.utils.data.Subset(val_dataset, range(10))
     val_loader = DataLoader(val_dataset, batch_size=args.tbs, num_workers=args.num_workers,
                             pin_memory=True, shuffle=False, drop_last=True)
     # # test
@@ -110,14 +108,16 @@ def main():
         train_loader = MyDataModule(max_dataset_size=args.max_dataset_size, batch_size=args.bs, num_workers=args.num_workers)
         # batch number
         if args.max_dataset_size is None:
-            batch_nums = [len(ds)//args.bs for ds in datasets_tr]
+            batch_nums = [len(ds)//args.bs for ds in datasets_tr[0]]
         else:
-            batch_nums = [min(len(ds), args.max_dataset_size)//args.bs for ds in datasets_tr]
+            batch_nums = [min(len(ds), args.max_dataset_size)//args.bs for ds in datasets_tr[0]]
         total_batch_num = sum(batch_nums)
         batch_num = (total_batch_num // args.ntasks) * (args.ntasks)
+        # print(batch_nums, total_batch_num, args.ntasks, batch_num)
     else:
         train_loader, batch_num = load_combined_datasets(args.dataset_name, args.bs, args.num_workers,
                                                          transform=trans_tr, shuffle=True, drop_last=True,
+                                                         subset_proportion=args.subset_proportion,
                                                          max_dataset_size=args.max_dataset_size)
 
     # batch number    

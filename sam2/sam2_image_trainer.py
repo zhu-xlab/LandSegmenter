@@ -264,7 +264,8 @@ class SAM2ImageTrainer(pl.LightningModule):
         if self.current_epoch==0 and self.use_class_weights:
                 self.class_weight_tensors = \
                     {k:torch.tensor(class_weight_list[k], device=self.device) for k in class_weight_list}
-        return super().on_train_epoch_start()
+        # print(f'Starting epoch {self.current_epoch}')
+        # return super().on_train_epoch_start()
     
 
     def validation_step(self, batch, batch_idx):
@@ -479,13 +480,13 @@ class SAM2ImageTrainer(pl.LightningModule):
         if n_classes==1:
             mask = (mask[0].detach().cpu().numpy()>0.5).astype(np.uint8)
         else:
-            maxp = mask.max(axis=0).values
-            mask = mask.argmax(axis=0)+1
-            mask[maxp<0.5] = 0
+            # maxp = mask.max(axis=0).values
+            mask = mask.argmax(axis=0) # +1
+            # mask[maxp<0.5] = 0
             mask = mask.detach().cpu().numpy().astype(np.uint8)
         class_labels = {i:str(i) for i in range(n_classes+1)}
-        y += 1
-        y[y>=MASK_CODE] = 0
+        # y += 1
+        # y[y>=MASK_CODE] = 0
         masks={'prediction':   {'mask_data': mask, 'class_labels': class_labels},
                'ground truth': {'mask_data': y.detach().cpu().numpy(), 'class_labels': class_labels}
                 }
@@ -513,11 +514,11 @@ class SAM2ImageTrainer(pl.LightningModule):
         _, ious = self._get_accs(masks.detach(), y)
         exist_acc = self._get_exist_accuracy(existance_predictions.detach(), y_exist)
         y_exist = y_exist.to(torch.bool)
-        self.log(f'{name_key}-{prefix}{aux_tag}_mious_exist', ious[y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
-        self.log(f'{name_key}-{prefix}{aux_tag}_mious_noexist', ious[~y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
-        self.log(f'{name_key}-{prefix}{aux_tag}_mious_pred_exist', iou_predictions[y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
-        self.log(f'{name_key}-{prefix}{aux_tag}_mious_pred_noexist', iou_predictions[~y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True)
-        self.log(f'{name_key}-{prefix}{aux_tag}_exist_acc', exist_acc, on_epoch=True, on_step=False, sync_dist=True)
+        self.log(f'{name_key}-{prefix}{aux_tag}_mious_exist', ious[y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True, batch_size=x.shape[0])
+        self.log(f'{name_key}-{prefix}{aux_tag}_mious_noexist', ious[~y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True, batch_size=x.shape[0])
+        self.log(f'{name_key}-{prefix}{aux_tag}_mious_pred_exist', iou_predictions[y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True, batch_size=x.shape[0])
+        self.log(f'{name_key}-{prefix}{aux_tag}_mious_pred_noexist', iou_predictions[~y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True, batch_size=x.shape[0])
+        self.log(f'{name_key}-{prefix}{aux_tag}_exist_acc', exist_acc, on_epoch=True, on_step=False, sync_dist=True, batch_size=x.shape[0])
         if batch_idx==0 and self.trainer.global_rank==0:
             for i in range(1):
                 self._log_imgs(name_key+'-'+prefix+aux_tag, x[i], masks[i], y[i])

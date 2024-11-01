@@ -1,4 +1,5 @@
 import h5py
+import torch
 import numpy as np
 from sam2.sam2_image_trainer import SAM2ImageTrainer as BaseTrainer
 
@@ -40,7 +41,7 @@ class SAM2ImageTrainerAux(BaseTrainer):
         img_feats = self._get_image_embed(x, waves)
 
         # make predictions and calculate losses
-        losses = []
+        loss = torch.tensor(0., device=self.device)
         for y, y_exist, n_class, prompt_token, name_key in zip(ys, y_exists, n_classes, prompt_tokens, cls_name_keys): 
             text_embeddings = self._get_text_embeddings(prompt_token)
 
@@ -56,11 +57,11 @@ class SAM2ImageTrainerAux(BaseTrainer):
         
             # calculate losses 
             class_weights = self.class_weight_tensors[name_key] if self.use_class_weights else None
-            loss = self._calculate_loss(n_class, y, y_exist, ious, precises, 
-                                        masks, exist_predictions, iou_predictions, precise_predictions,
-                                        class_weights=class_weights,
-                                        from_aux_decoder=aux, log=log_insides_func,
-                                        )
+            loss_ = self._calculate_loss(n_class, y, y_exist, ious, precises, 
+                                         masks, exist_predictions, iou_predictions, precise_predictions,
+                                         class_weights=class_weights,
+                                         from_aux_decoder=aux, log=log_insides_func,
+                                         )
 
             if not if_weak_lbl:
                 # # # minor forward process to estimate noise mask quality # # # 
@@ -81,17 +82,19 @@ class SAM2ImageTrainerAux(BaseTrainer):
                     loss_quality = loss_quality*n_class
                 if log_insides_func:
                     self.log(f'tr{counter_pref}_loss_qual', loss_quality, on_epoch=True, on_step=False, sync_dist=True)
-                loss += loss_quality
+                loss_ = loss_ + loss_quality
 
             # training image examples  
             if batch_idx<2 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
                 self._log_imgs(f'tr{aux_pref}_{name_key}', x[0], masks[0], y[0])
             
-            losses.append(loss)
-            self.log(f'tr{counter_pref}_loss_{name_key}', loss, on_epoch=True, on_step=False, sync_dist=True)
+            # losses.append(loss)
+            loss = loss + loss_
+            # self.log(f'tr{counter_pref}_loss_{name_key}', loss, on_epoch=True, on_step=True, sync_dist=True, batch_size=x.shape[0])
         
         # total loss
-        loss = sum(losses)
+        # loss = sum(losses)
+        self.log(f'tr{counter_pref}_loss', loss, on_epoch=True, on_step=False, sync_dist=True) #, batch_size=x.shape[0])
         
         return loss
     

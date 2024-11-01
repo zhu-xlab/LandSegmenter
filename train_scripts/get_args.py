@@ -237,7 +237,7 @@ def get_device_info(args):
         
     if args.slurm:
         args.nodes = int(os.environ["SLURM_NNODES"])
-        args.devices = int(os.environ["SLURM_TASKS_PER_NODE"].split('(')[0])
+        args.devices = int(os.environ["SLURM_TASKS_PER_NODE"][0]) #.split('(')[0])
         args.current_device = int(os.environ["SLURM_LOCALID"])
         print(f'Slurm found with {args.nodes} nodes, {args.devices} devices per node (current:{args.current_device}).')
         args.ntasks = int(os.environ["SLURM_NTASKS"])
