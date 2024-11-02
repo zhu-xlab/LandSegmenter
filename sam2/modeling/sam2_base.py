@@ -122,7 +122,7 @@ class SAM2Base(torch.nn.Module):
         self.no_noise_mask_embed = nn.Embedding(1, self.hidden_dim)
 
         # for co-teaching
-        if self.use_auxiliary_decoder:
+        if self.use_auxiliary_decoder==1:
             self.sam_mask_decoder_aux = MaskDecoder(
                 num_multimask_outputs=3,
                 transformer=TwoWayTransformer(
@@ -149,39 +149,88 @@ class SAM2Base(torch.nn.Module):
                 nn.Conv2d(self.noise_mask_in_chans, self.hidden_dim, kernel_size=1),
             )
             self.no_noise_mask_embed_aux = nn.Embedding(1, self.hidden_dim)
+        elif self.use_auxiliary_decoder>1:
+            self.sam_mask_decoder_auxs, self.sam_noise_mask_downscaling_auxs, self.no_noise_mask_embed_auxs = {}, {}, {}
+            for i in range(self.use_auxiliary_decoder):
+                sam_mask_decoder_aux = MaskDecoder(
+                    num_multimask_outputs=3,
+                    transformer=TwoWayTransformer(
+                        depth=2,
+                        embedding_dim=self.sam_prompt_embed_dim,
+                        mlp_dim=2048,
+                        num_heads=8,
+                    ),
+                    transformer_dim=self.sam_prompt_embed_dim,
+                    iou_head_depth=3,
+                    iou_head_hidden_dim=256,
+                    use_high_res_features=self.use_high_res_features_in_sam,
+                    iou_prediction_use_sigmoid=self.iou_prediction_use_sigmoid,
+                    **(self.sam_mask_decoder_extra_args or {}),
+                )
+                setattr(self, f'sam_mask_decoder_aux_{i}', sam_mask_decoder_aux)
+                # for noise mask quality prediction
+                sam_noise_mask_downscaling_aux = nn.Sequential(
+                    nn.Conv2d(1, self.noise_mask_in_chans // 4, kernel_size=2, stride=2),
+                    LayerNorm2d(self.noise_mask_in_chans // 4),
+                    nn.GELU(),
+                    nn.Conv2d(self.noise_mask_in_chans // 4, self.noise_mask_in_chans, kernel_size=2, stride=2),
+                    LayerNorm2d(self.noise_mask_in_chans),
+                    nn.GELU(),
+                    nn.Conv2d(self.noise_mask_in_chans, self.hidden_dim, kernel_size=1),
+                )
+                setattr(self, f'sam_noise_mask_downscaling_aux_{i}', sam_noise_mask_downscaling_aux)
+                no_noise_mask_embed_aux = nn.Embedding(1, self.hidden_dim)
+                setattr(self, f'no_noise_mask_embed_aux_{i}', no_noise_mask_embed_aux)
+                
 
     def forward_image(self, img_batch: torch.Tensor, waves: List[float]):
         """Get the image feature on the input batch."""
         backbone_out = self.image_encoder(img_batch, waves)
+        # precompute projected level 0 and level 1 features in SAM decoder
+        # with the main decoder
         if self.use_high_res_features_in_sam:
-            # precompute projected level 0 and level 1 features in SAM decoder
-            # to avoid running it again on every SAM click
-            # # using the auxilary decoder 
-            if self.use_auxiliary_decoder:
-                backbone_out['backbone_fpn_aux'] = []
-                backbone_out["backbone_fpn_aux"].append(
-                    self.sam_mask_decoder_aux.conv_s0(backbone_out["backbone_fpn"][0])
-                )
-                backbone_out["backbone_fpn_aux"].append(
-                    self.sam_mask_decoder_aux.conv_s1(backbone_out["backbone_fpn"][1])
-                )
+            backbone_out["backbone_fpn_de"] = []
             # # using the main decoder
-            backbone_out["backbone_fpn"][0] = self.sam_mask_decoder.conv_s0(
-                backbone_out["backbone_fpn"][0]
+            backbone_out["backbone_fpn_de"].append(
+                self.sam_mask_decoder.conv_s0(backbone_out["backbone_fpn"][0])
             )
-            backbone_out["backbone_fpn"][1] = self.sam_mask_decoder.conv_s1(
-                backbone_out["backbone_fpn"][1]
+            backbone_out["backbone_fpn_de"].append(
+                self.sam_mask_decoder.conv_s1(backbone_out["backbone_fpn"][1])
+            )
+            backbone_out["backbone_fpn_de"].append(
+                backbone_out["backbone_fpn"][2].clone()
             )
         return backbone_out
+    
+
+    def _get_backbone_features_from_aux_decoder(self, backbone_out, aux_decoder_index=True):
+        if self.use_high_res_features_in_sam:
+            if aux_decoder_index is True:
+                decoder = self.sam_mask_decoder_aux
+            else:
+                assert type(aux_decoder_index) is int, "aux_decoder_index must be an integer or True."
+                decoder = getattr(self, f'sam_mask_decoder_aux_{aux_decoder_index}')
+            
+            backbone_out_aux = []
+            backbone_out_aux.append(
+                decoder.conv_s0(backbone_out["backbone_fpn"][0])
+            )
+            backbone_out_aux.append(
+                decoder.conv_s1(backbone_out["backbone_fpn"][1])
+            )
+            backbone_out_aux.append(
+                backbone_out["backbone_fpn"][2].clone()
+            )
+        return backbone_out_aux
 
 
     def _prepare_backbone_features(self, backbone_out):
         """Prepare and flatten visual features."""
-        backbone_out = backbone_out.copy()
+        # backbone_out = backbone_out.copy()
         # assert len(backbone_out["backbone_fpn"]) == len(backbone_out["vision_pos_enc"])
-        assert len(backbone_out["backbone_fpn"]) >= self.num_feature_levels
+        assert len(backbone_out) >= self.num_feature_levels, f"backbone_out must have at least {self.num_feature_levels} levels, actual: {len(backbone_out)}"
 
-        feature_maps = backbone_out["backbone_fpn"][-self.num_feature_levels :]
+        feature_maps = backbone_out[-self.num_feature_levels :]
         # vision_pos_embeds = backbone_out["vision_pos_enc"][-self.num_feature_levels :]
 
         # feat_sizes = [(x.shape[-2], x.shape[-1]) for x in vision_pos_embeds]

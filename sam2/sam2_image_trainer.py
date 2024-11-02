@@ -119,7 +119,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         batch_size = x.shape[0]
         # image embeddings
         # print(f'In trainer-forward: waves - {waves}')
-        img_feats = self._get_image_embed(x, waves)
+        img_feats = self._get_image_embed(x, waves, use_aux)
         # prompt text embeddings
         n_classes = prompt.shape[0]
         text_embeddings = self._get_text_embeddings(prompt)
@@ -134,17 +134,27 @@ class SAM2ImageTrainer(pl.LightningModule):
     def forward_decoder(self, img_feats, text_embeddings, n_classes, batch_size, use_aux=False):
         _, _, h, w = img_feats["image_embed"].shape   # [batch_size, 256, 16, 16]
         # noise mask embeddings
-        no_noise_mask_embed = self.model.no_noise_mask_embed_aux if use_aux else self.model.no_noise_mask_embed
+        if type(use_aux)==bool:
+            no_noise_mask_embed = self.model.no_noise_mask_embed_aux if use_aux else self.model.no_noise_mask_embed
+        else:
+            assert type(use_aux)==int, 'use_aux should be either boolean or integer!'
+            no_noise_mask_embed = getattr(self.model, f'no_noise_mask_embed_aux_{use_aux}') 
         noise_mask_embeddings = no_noise_mask_embed.weight.reshape(1, -1, 1, 1).expand(
             n_classes*batch_size, -1, h, w
             )
         
         # make predictions
-        mask_decoder = self.model.sam_mask_decoder_aux if use_aux else self.model.sam_mask_decoder
+        if type(use_aux)==bool:
+            mask_decoder = self.model.sam_mask_decoder_aux if use_aux else self.model.sam_mask_decoder
+            high_res_key = 'high_res_feats_aux' if use_aux else 'high_res_feats'
+        else:
+            mask_decoder = getattr(self.model, f'sam_mask_decoder_aux_{use_aux}')
+            high_res_key = f'high_res_feats_aux_{use_aux}'
         masks, iou_predictions, precise_predictions, exist_predictions = self._pred_mask_and_iou(
             mask_decoder,
             img_feats, text_embeddings, noise_mask_embeddings,
-            n_classes, batch_size)
+            n_classes, batch_size,
+            high_res_key)
         
         return masks, iou_predictions, precise_predictions, exist_predictions
 
@@ -164,15 +174,24 @@ class SAM2ImageTrainer(pl.LightningModule):
         # rearrange noise mask to be compatible with image feature embeddings
         noise_mask = rearrange(noise_mask.to(text_embeddings.dtype), 'b c h w -> (c b) 1 h w')
         # noise mask embeddings
-        sam_noise_mask_downscaling = self.model.sam_noise_mask_downscaling_aux if use_aux else self.model.sam_noise_mask_downscaling
+        if type(use_aux)==bool:
+            sam_noise_mask_downscaling = self.model.sam_noise_mask_downscaling_aux if use_aux else self.model.sam_noise_mask_downscaling
+        else:
+            sam_noise_mask_downscaling = self.model.sam_noise_mask_downscaling_auxs[use_aux]
         noise_mask_embeddings = sam_noise_mask_downscaling(noise_mask)
 
         # make predictions
-        mask_decoder = self.model.sam_mask_decoder_aux if use_aux else self.model.sam_mask_decoder
+        if type(use_aux)==bool:
+            mask_decoder = self.model.sam_mask_decoder_aux if use_aux else self.model.sam_mask_decoder
+            high_res_key = 'high_res_feats_aux' if use_aux else 'high_res_feats'
+        else:
+            mask_decoder = self.model.sam_mask_decoder_auxs[use_aux]
+            high_res_key = f'high_res_feats_aux_{use_aux}'
         masks, iou_predictions, precise_predictions, exist_predictions = self._pred_mask_and_iou(
             mask_decoder,
             img_feats, text_embeddings, noise_mask_embeddings,
-            n_classes, batch_size)
+            n_classes, batch_size,
+            high_res_key)
         
         return masks, iou_predictions, precise_predictions, exist_predictions
         
@@ -319,6 +338,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         self,
         input_image: Union[torch.Tensor],  # [B, C, H, W]
         wave_list: List[float],
+        aux_decoders: List[Union[bool, int]] | bool | int = [],
     ) -> None:
         """
         Calculates the image embeddings for the provided image, allowing
@@ -329,6 +349,8 @@ class SAM2ImageTrainer(pl.LightningModule):
           with pixel values in [0, 255].
           image_format (str): The color format of the image, in ['RGB', 'BGR'].
         """
+        if type(aux_decoders) != list:
+            aux_decoders = [] if aux_decoders is False else [aux_decoders]
         # assert (
         #     len(input_image.shape) == 4 and input_image.shape[1] == 3
         # ), f"input_image must be of size 1x3xHxW, got {input_image.shape}"
@@ -336,7 +358,8 @@ class SAM2ImageTrainer(pl.LightningModule):
         batch_size = input_image.shape[0]
         # print(f'In trainer-embed: waves - {wave_list}')
         backbone_out = self.model.forward_image(input_image, wave_list)
-        vision_feats = self.model._prepare_backbone_features(backbone_out)
+        # high resolution features for the main decoder
+        vision_feats = self.model._prepare_backbone_features(backbone_out["backbone_fpn_de"])
         # Add no_mem_embed, which is added to the lowest rest feat. map during training on videos
         # if self.model.directly_add_no_mem_embed:
         vision_feats[-1] = vision_feats[-1] + self.model.no_mem_embed
@@ -346,6 +369,21 @@ class SAM2ImageTrainer(pl.LightningModule):
             for feat, feat_size in zip(vision_feats[::-1], self._bb_feat_sizes[::-1])
         ][::-1]
         features = {"image_embed": feats[-1], "high_res_feats": feats[:-1]}  # self._features
+
+        # high resolution features for the auxiliary decoders
+        if len(aux_decoders)>0:
+            for aux in aux_decoders:
+                assert aux is True or type(aux)==int, 'Auxiliary decoder should be True or an integer!'
+                backbone_out_aux = self.model._get_backbone_features_from_aux_decoder(backbone_out, aux)
+                vision_feats_aux = self.model._prepare_backbone_features(backbone_out_aux)
+                vision_feats_aux[-1] = vision_feats_aux[-1] + self.model.no_mem_embed
+                feats_aux = [
+                    feat.permute(1, 2, 0).view(batch_size, -1, *feat_size)
+                    for feat, feat_size in zip(vision_feats_aux[::-1], self._bb_feat_sizes[::-1])
+                ][::-1]
+                aux_key = f"high_res_feats_aux" if aux is True else f"high_res_feats_aux_{aux}"
+                features[aux_key] = feats_aux[:-1]
+
         return features
     
 
@@ -387,7 +425,7 @@ class SAM2ImageTrainer(pl.LightningModule):
 
 
     def _pred_mask_and_iou(self, decoder, img_feats, text_embeddings, noise_mask_embeddings,
-                           n_classes, batch_size):
+                           n_classes, batch_size, high_res_key='high_res_feats'):
         # rearrange text embeddings
         text_embeddings = rearrange(text_embeddings.unsqueeze(0).expand(batch_size, -1, -1),
                                     'batch_size n_classes dim -> (n_classes batch_size) dim', 
@@ -396,7 +434,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         
         # get high resolution features
         high_res_features = [
-            feat_level.repeat(n_classes, 1, 1, 1) for feat_level in img_feats["high_res_feats"]
+            feat_level.repeat(n_classes, 1, 1, 1) for feat_level in img_feats[high_res_key]
         ]
 
         # get predictions
@@ -520,7 +558,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.log(f'{name_key}-{prefix}{aux_tag}_mious_pred_noexist', iou_predictions[~y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True, batch_size=x.shape[0])
         self.log(f'{name_key}-{prefix}{aux_tag}_exist_acc', exist_acc, on_epoch=True, on_step=False, sync_dist=True, batch_size=x.shape[0])
         if batch_idx==0 and self.trainer.global_rank==0:
-            for i in range(1):
+            for i in [0, 5, 9]:
                 self._log_imgs(name_key+'-'+prefix+aux_tag, x[i], masks[i], y[i])
     
 

@@ -1,6 +1,7 @@
 import datetime
 import os
 import sys
+import numpy as np
 
 # appending self-defined package path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -17,6 +18,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from train_scripts.get_args import get_args_1st_stage_train as get_args
 from sam2.sam2_image_trainer import SAM2ImageTrainer
 from sam2.sam2_image_w_auxDe_trainer import SAM2ImageTrainerAux
+from sam2.sam2_image_w_sepAuxDe4Weak_trainer import SAM2ImageTrainerSepAuxDe4Weak
 
 # dataset
 from dataset.get_combined_datasets import load_combined_datasets, get_datasets_train, MyDistributedBatchSampler
@@ -69,7 +71,8 @@ def main():
                                mode=datasets_settings_test['dw']['mode'],
                                n_bands=datasets_settings_test['dw']['n_channels'],
                                transform=trans_ts)
-    val_dataset = torch.utils.data.Subset(val_dataset, range(10))
+    subset_inds = np.arange(9).tolist()+[20]
+    val_dataset = torch.utils.data.Subset(val_dataset, subset_inds)  # range(args.tbs))
     val_loader = DataLoader(val_dataset, batch_size=args.tbs, num_workers=args.num_workers,
                             pin_memory=True, shuffle=False, drop_last=True)
     # # test
@@ -127,7 +130,9 @@ def main():
 
     ###### 3 - define the model ######
     torch.set_float32_matmul_precision('high')
-    if args.use_aux_decoder:
+    if args.use_sep_aux_de_weak:
+        model = SAM2ImageTrainerSepAuxDe4Weak(args)
+    elif args.use_aux_decoder:
         model = SAM2ImageTrainerAux(args)
     else:
         model = SAM2ImageTrainer(args)

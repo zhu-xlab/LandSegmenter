@@ -38,7 +38,7 @@ class SAM2ImageTrainerAux(BaseTrainer):
 
         # # # major forward process # # #            
         # image embeddings
-        img_feats = self._get_image_embed(x, waves)
+        img_feats = self._get_image_embed(x, waves, True)
 
         # make predictions and calculate losses
         loss = torch.tensor(0., device=self.device)

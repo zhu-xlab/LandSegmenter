@@ -103,6 +103,7 @@ def get_common_args(parser):
     parser.add_argument('--ckpt-path-clip', type=str, default='checkpoints/RemoteCLIP-ViT-B-32.pt', help='Path to the checkpoint file (clip)') 
     parser.add_argument('--load-decoder-weights', dest='load_de', action='store_true', default=False, help='Whether to load decoder weights or not')
     parser.add_argument('--load-aux-decoder-weights', dest='load_aux_de', action='store_true', default=False, help='Whether to load auxiliary decoder weights or not (only used when load_decoder_weights is True)')
+    parser.add_argument('--use-separate-auxiliary-decoder-for-weak-labels', dest='use_sep_aux_de_weak', action='store_true', default=False, help='Whether to use separate auxiliary decoder for each weakly labeled dataset or not')
     parser.add_argument('--use-auxiliary-decoder', dest='use_aux_decoder', action='store_true', default=False, help='Whether to use auxiliary decoder (double decoders) or not')
     parser.add_argument('--use-noise-mask-loss', action='store_true', default=False, help='Whether to use the mask and eixstance mask on the branch where noise mask is used as input')
     parser.add_argument('--mute-adaptor', action='store_true', default=False, help='Whether to use adaptor or not')
@@ -143,7 +144,10 @@ def get_common_args(parser):
 def set_log_files(args):
     # group name
     noise_mask_loss_tag = 'l' if args.use_noise_mask_loss else ''
-    aux = f'_aux{noise_mask_loss_tag}_attcp' if args.use_aux_decoder else '_attcp'
+    if args.use_sep_aux_de_weak:
+        aux = f'_sepaux_attcp'
+    else:
+        aux = f'_aux{noise_mask_loss_tag}_attcp' if args.use_aux_decoder else '_attcp'
     if isinstance(args.dataset_name, list):
         dataset_tag = 'exact'
     else:
