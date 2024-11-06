@@ -75,7 +75,11 @@ class SAM2ImageTrainer(pl.LightningModule):
                                  f'++model.image_encoder.trunk.dofa_ckpt_path={args.dofa_ckpt_path}',
                                  f'++model.use_auxiliary_decoder={args.use_aux_decoder}',]
         if args.mute_adaptor: hydra_overrides_extra += ['++model.image_encoder.trunk.adaptor=None']
-        if args.dofa_unfix_weights: hydra_overrides_extra += ['++model.image_encoder.trunk.dofa_unfix_weights=True']
+        if args.dofa_unfix_weights: 
+            hydra_overrides_extra += ['++model.image_encoder.trunk.dofa_unfix_weights=True']
+            self.dofa_lr_scale = args.dofa_lr_scale
+        else:
+            assert args.dofa_lr_scale==1, f'dofa_lr_scale={args.dofa_lr_scale}, but dofa_unfix_weights is False!'
         self.model = build_sam2(args.config_file, args.ckpt_path, args.ckpt_path_clip, 
                                 load_decoder_weights=args.load_de,
                                 load_aux_decoder_weights=args.load_aux_de,
@@ -92,6 +96,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         # others TO BE DEFINED
         self.multimask_output = False
         self.tokenizer = SimpleTokenizer()
+        self.share_connect = args.share_connect
         # self.n_prompts = args.n_prompts if type(args.n_prompts)==type([]) else [args.n_prompts]
         # loss weights
         self.wfocal = args.wfocal
@@ -198,15 +203,28 @@ class SAM2ImageTrainer(pl.LightningModule):
 
     # ------ Optimizer ------ #
     def configure_optimizers(self):
+        # parameters
+        if self.dofa_lr_scale !=1:
+            dofa_params, other_params = [], []
+            for name, param in self.model.named_parameters():
+                if 'dofa' in name: 
+                    dofa_params.append(param)
+                else:
+                    other_params.append(param)
+            params = [{'params': dofa_params, 'lr': self.lr*self.dofa_lr_scale},
+                      {'params': other_params, 'lr': self.lr}]
+        else:
+            params = self.parameters()
+        
         # optimizer
         if self.opt=='adam':
-            optimizer = optim.Adam(self.parameters(), lr=self.lr, weight_decay=1e-8)
+            optimizer = optim.Adam(params, lr=self.lr, weight_decay=1e-8)
             print('Adam is used as optimizer!')
         elif self.opt=='adamw':
-            optimizer = optim.AdamW(self.parameters(), lr=self.lr, weight_decay=0.1)  # weight_decay is set according to sam2
+            optimizer = optim.AdamW(params, lr=self.lr, weight_decay=0.1)  # weight_decay is set according to sam2
             print('AdamW is used as optimizer!')
         elif self.opt=='sgd':
-            optimizer = optim.SGD(self.parameters(), lr=self.lr, momentum=0.9, weight_decay=1e-4)
+            optimizer = optim.SGD(params, lr=self.lr, momentum=0.9, weight_decay=1e-4)
             print('SGD is used as optimizer!')
         else:
             raise ValueError("Please provide correct optimizer type (adam or sgd)!")
@@ -374,15 +392,19 @@ class SAM2ImageTrainer(pl.LightningModule):
         if len(aux_decoders)>0:
             for aux in aux_decoders:
                 assert aux is True or type(aux)==int, 'Auxiliary decoder should be True or an integer!'
-                backbone_out_aux = self.model._get_backbone_features_from_aux_decoder(backbone_out, aux)
-                vision_feats_aux = self.model._prepare_backbone_features(backbone_out_aux)
-                vision_feats_aux[-1] = vision_feats_aux[-1] + self.model.no_mem_embed
-                feats_aux = [
-                    feat.permute(1, 2, 0).view(batch_size, -1, *feat_size)
-                    for feat, feat_size in zip(vision_feats_aux[::-1], self._bb_feat_sizes[::-1])
-                ][::-1]
                 aux_key = f"high_res_feats_aux" if aux is True else f"high_res_feats_aux_{aux}"
-                features[aux_key] = feats_aux[:-1]
+                if self.share_connect:
+                    features[aux_key] = features["high_res_feats"]
+                else:
+                    backbone_out_aux = self.model._get_backbone_features_from_aux_decoder(backbone_out, aux)
+                    vision_feats_aux = self.model._prepare_backbone_features(backbone_out_aux)
+                    vision_feats_aux[-1] = vision_feats_aux[-1] + self.model.no_mem_embed
+                    feats_aux = [
+                        feat.permute(1, 2, 0).view(batch_size, -1, *feat_size)
+                        for feat, feat_size in zip(vision_feats_aux[::-1], self._bb_feat_sizes[::-1])
+                    ][::-1]
+                    aux_key = f"high_res_feats_aux" if aux is True else f"high_res_feats_aux_{aux}"
+                    features[aux_key] = feats_aux[:-1]
 
         return features
     

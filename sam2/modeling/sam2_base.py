@@ -219,7 +219,7 @@ class SAM2Base(torch.nn.Module):
                 decoder.conv_s1(backbone_out["backbone_fpn"][1])
             )
             backbone_out_aux.append(
-                backbone_out["backbone_fpn"][2].clone()
+                backbone_out["backbone_fpn"][2]
             )
         return backbone_out_aux
 
