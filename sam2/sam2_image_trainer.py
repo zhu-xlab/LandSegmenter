@@ -23,9 +23,10 @@ from torch.nn import functional as F
 
 # from segmentation_models_pytorch.losses import DiceLoss, FocalLoss
 from kornia.losses import (                   # type: ignore
-    dice_loss, binary_focal_loss_with_logits,  
+    dice_loss, binary_focal_loss_with_logits, focal_loss,
     FocalLoss, DiceLoss
 )
+from sam2.utils.myLosses import SoftDiceLoss
 
 # import sam2 package
 # from sam2.modeling.sam2_base import SAM2Base
@@ -77,9 +78,9 @@ class SAM2ImageTrainer(pl.LightningModule):
         if args.mute_adaptor: hydra_overrides_extra += ['++model.image_encoder.trunk.adaptor=None']
         if args.dofa_unfix_weights: 
             hydra_overrides_extra += ['++model.image_encoder.trunk.dofa_unfix_weights=True']
-            self.dofa_lr_scale = args.dofa_lr_scale
         else:
             assert args.dofa_lr_scale==1, f'dofa_lr_scale={args.dofa_lr_scale}, but dofa_unfix_weights is False!'
+        self.dofa_lr_scale = args.dofa_lr_scale
         self.model = build_sam2(args.config_file, args.ckpt_path, args.ckpt_path_clip, 
                                 load_decoder_weights=args.load_de,
                                 load_aux_decoder_weights=args.load_aux_de,
@@ -499,7 +500,18 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.L1Loss = nn.L1Loss(reduction='none')
         self.BCELoss_noreduce = nn.BCEWithLogitsLoss(reduction='none') 
 
-        # multi-class loss
+        # soft dice loss
+        self.SoftBDLoss = SoftDiceLoss(mode='multilabel', 
+                                       from_logits=True, 
+                                       average='macro',
+                                       ignore_index=MASK_CODE)
+        self.SoftDLoss  = SoftDiceLoss(mode='multiclass', 
+                                       from_logits=True, 
+                                       average='micro',
+                                       ignore_index=MASK_CODE)
+
+
+        # hard multi-class loss
         if self.use_multiclass_loss:
             self.CELoss = nn.CrossEntropyLoss(ignore_index=MASK_CODE)
             self.DLoss = DiceLoss(average='micro', 
@@ -587,7 +599,7 @@ class SAM2ImageTrainer(pl.LightningModule):
     def _calculate_loss(self, n_classes, y, y_exist=None, ious=None, precises=None,
                         mask_predictions=None, exist_predictions=None, 
                         iou_predictions=None, precise_predictions=None,
-                        class_weights=None,
+                        class_weights=None, hete_uncertainty=None,
                         from_aux_decoder=False, log=True):
         aux_tag = '_aux' if from_aux_decoder else ''
 
@@ -599,48 +611,68 @@ class SAM2ImageTrainer(pl.LightningModule):
         y_one_hot = F.one_hot(y.clamp(0, n_classes - 1), num_classes=n_classes).permute(0, 3, 1, 2)  # Reshape to [5, 3, 4, 4]
         y_one_hot = y_one_hot * mask
         y_one_hot_wnodata = y_one_hot * mask + (~mask) * MASK_CODE
-        if class_weights is not None:
-            reduce='none'
-            n_per_class = (y_one_hot*class_weights[:, None, None]).sum(axis=(0,2,3))
-        else:
-            reduce='mean'
+        # get weights from hete_uncertainty
+        if hete_uncertainty is not None:  
+            weights_ = torch.exp(-hete_uncertainty)
+            weights = mask.float()*weights_
+            
         for w, k in zip([self.wdice, self.wfocal, self.wce], ['dice', 'focal', 'bce']):
             if w>0:
                 if k=='bce':
+                    reduce = 'mean' if hete_uncertainty is None else 'none'
                     loss_ = w*F.binary_cross_entropy_with_logits(
                         mask_predictions, y_one_hot.float(), 
                         weight=mask.float(), 
                         pos_weight=class_weights[:, None, None] if class_weights is not None else None, 
                         reduction=reduce,
                     )
-                    if class_weights is not None:
-                        loss_ = (loss_.sum(axis=(0,2,3))/n_per_class).sum()
+                    if reduce == 'none':
+                        loss_ = (loss_*weights)[mask].mean()
                 elif k=='dice':
-                    loss_ = w*dice_loss(
-                        mask_predictions, y, 
-                        average='macro', weight=class_weights,
-                        ignore_index=MASK_CODE
-                    )
+                    if hete_uncertainty is None:
+                        loss_ = w*dice_loss(
+                            mask_predictions, y, 
+                            average='macro', weight=class_weights,
+                            ignore_index=MASK_CODE
+                        )
+                    else: 
+                        loss_ = w*self.SoftBDLoss(mask_predictions, y_one_hot_wnodata, 
+                                                  weights=weights,
+                                                  class_weights=class_weights,)
                     loss_ = loss_ * n_classes
                 elif k=='focal':
+                    reduce = 'mean' if hete_uncertainty is None else 'none'
                     loss_ = w*binary_focal_loss_with_logits(
                         mask_predictions, y_one_hot_wnodata,
                         reduction=reduce, pos_weight=class_weights,
                         ignore_index=MASK_CODE,
                     )
-                    if class_weights is not None:
-                        loss_ = (loss_.sum(axis=(0,2,3))/n_per_class).sum()
+                    if reduce=='none':
+                        loss_ = (loss_*weights)[mask].mean()  # (loss_.sum(axis=(0,2,3))/n_per_class).sum()
 
                 loss = loss+loss_
 
         # multi-class loss
         if self.use_multiclass_loss:
-            for L, w in zip([self.DLoss, self.FLoss, self.CELoss], [self.wdice, self.wfocal, self.wce]):
-                if w>0:
-                    loss_ = w*L(mask_predictions, y.clone())  # otherwise encounter the error: RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.LongTensor [6, 256, 256]] is at version 2; expected version 0 instead.
-                    loss = loss+loss_
-                else:
-                    continue
+            if hete_uncertainty is None:
+                for L, w in zip([self.DLoss, self.FLoss, self.CELoss], [self.wdice, self.wfocal, self.wce]):
+                    if w>0:
+                        loss_ = w*L(mask_predictions, y.clone())  # otherwise encounter the error: RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.LongTensor [6, 256, 256]] is at version 2; expected version 0 instead.
+                        loss = loss+loss_
+                    else:
+                        continue
+            else:
+                pixel_weights_mean = weights.mean(axis=1)
+                for w, k in zip([self.wdice, self.wfocal, self.wce], ['dice', 'focal', 'ce']):
+                    if k == 'ce':
+                        loss_ = F.cross_entropy(mask_predictions, y, ignore_index=MASK_CODE, reduction='none')
+                        loss_ = w*(loss_*pixel_weights_mean)[mask[:,0]].mean() # loss_: [batch_size, h, w]
+                    elif k == 'dice':
+                        loss_ = w*self.SoftDLoss(mask_predictions, y, weights=pixel_weights_mean)
+                    elif k == 'focal':
+                        loss_ = focal_loss(mask_predictions, y, reduction='none', ignore_index=MASK_CODE, alpha=0.25)
+                        loss_ = loss_.mean(axis=(1))   # loss_: [batch_size, c, h, w]
+                        loss_ = w*(loss_*pixel_weights_mean)[mask[:,0]].mean()
         if log: self.log(f'tr{aux_tag}_loss_mask', loss, on_epoch=True, on_step=False, sync_dist=True)
         
         # existance loss

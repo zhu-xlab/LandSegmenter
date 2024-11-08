@@ -29,6 +29,34 @@ def get_args_1st_stage_train():
 
     return args
 
+def get_args_train_w_unc():
+    parser = argparse.ArgumentParser(description='Train SAM2 with exact labels')
+    # data settings
+    parser.add_argument('--dataset_name', type=str, nargs='*', default=['dw', 'dynamicearthnet', 'openearthmap'], 
+                        help='Names of the datasets used for training')
+    parser.add_argument('--subset_proportion', type=float, default=1, help='Proportion of the dataset used for training')
+    parser.add_argument('--max_dataset_size', type=int, default=None, help='Maximum number of samples used for training')
+
+    # uncertainty settings
+    parser.add_argument('--weak_weight_rampup_end', type=int, default=100, help='Number of epochs for weak weight rampup')
+    parser.add_argument('--weak_weight_rampup_start', type=int, default=0, help='Number of epochs for weak weight rampup')
+    parser.add_argument('--weak_weight_final', type=float, default=1.0, help='Final weight of weak loss')
+    parser.add_argument('--weak_uncertainty_lambda', dest='weak_unc_lambda', type=float, default=1.0, help='Weight of weak uncertainty scale loss')
+
+    # get common arguments
+    parser = get_common_args(parser)
+
+    # initialize arguments
+    args = parser.parse_args()
+
+    # computing environment parameters
+    args = get_device_info(args)
+
+    # set saving dir
+    args = set_log_files(args, w_unc=True)
+
+    return args
+
 
 def get_args_1st_stage_test():
     parser = argparse.ArgumentParser(description='Test 1st stage models')
@@ -105,11 +133,13 @@ def get_common_args(parser):
     parser.add_argument('--load-aux-decoder-weights', dest='load_aux_de', action='store_true', default=False, help='Whether to load auxiliary decoder weights or not (only used when load_decoder_weights is True)')
     parser.add_argument('--use-separate-auxiliary-decoder-for-weak-labels', dest='use_sep_aux_de_weak', action='store_true', default=False, help='Whether to use separate auxiliary decoder for each weakly labeled dataset or not')
     parser.add_argument('--use-auxiliary-decoder', dest='use_aux_decoder', action='store_true', default=False, help='Whether to use auxiliary decoder (double decoders) or not')
+    parser.add_argument('--share-short-connect-weights', dest='share_connect', action='store_true', default=False, help='Whether to share short connection weights or not when using auxiliary decoder')
     parser.add_argument('--use-noise-mask-loss', action='store_true', default=False, help='Whether to use the mask and eixstance mask on the branch where noise mask is used as input')
     parser.add_argument('--mute-adaptor', action='store_true', default=False, help='Whether to use adaptor or not')
     parser.add_argument('--dofa-type', type=str, default=None, choices=['vit_base_patch16', 'vit_large_patch16', 'None'], help='Type of DoFA model to use. Default is None (not using dofa).')
     parser.add_argument('--dofa-ckpt-path', type=str, default=None, help='Path to the checkpoint file (dofa)')
     parser.add_argument('--dofa-unfix-weights', action='store_true', default=False, help='Whether to unfix dofa weights or not')
+    parser.add_argument('--dofa-lr-scale', type=float, default=1.0, help='Learning rate scale for DOFA if dofa-unfix-weights is True')
     parser.add_argument('--resume', type=str, default=False, help='Path of the checkpoint file from which the training is resumed.')
     # device settings
     parser.add_argument('--accelerator', type=str, default='cpu', choices=['cpu','gpu'], help='Type of used accelerator')
@@ -141,13 +171,14 @@ def get_common_args(parser):
     return parser
 
 
-def set_log_files(args):
+def set_log_files(args, w_unc=False):
     # group name
     noise_mask_loss_tag = 'l' if args.use_noise_mask_loss else ''
     if args.use_sep_aux_de_weak:
         aux = f'_sepaux_attcp'
     else:
-        aux = f'_aux{noise_mask_loss_tag}_attcp' if args.use_aux_decoder else '_attcp'
+        ctag = 'c' if args.share_connect else ''
+        aux = f'_aux{noise_mask_loss_tag}{ctag}_attcp' if args.use_aux_decoder else '_attcp'
     if isinstance(args.dataset_name, list):
         dataset_tag = 'exact'
     else:
@@ -158,7 +189,12 @@ def set_log_files(args):
         if args.dofa_type in [None, 'None']:
             args.gname = f'FT{aux}_{dataset_tag}'
         else:
-            dofa_active = 'A' if args.dofa_unfix_weights else ''
+            if args.dofa_unfix_weights:
+                dofa_active = 'A'
+                if args.dofa_lr_scale!=1.0:
+                    dofa_active += f'x{args.dofa_lr_scale}'  
+            else:
+                dofa_active = ''                   
             args.gname = f'FT_dofa{args.dofa_type[4]}{dofa_active}{aux}_{dataset_tag}'
     else:
         args.gname = f'FT{aux}_woAd_{dataset_tag}'
@@ -201,6 +237,10 @@ def set_log_files(args):
                 ea = int(np.ceil(np.log10(1/args.schdv[2])))
                 eb = int(args.schdv[2]*10**ea)
                 args.job_type += f'_f{eb}e{ea}'  # final_lr setting
+    # for uncertainty part
+    if w_unc:
+        args.gname += f'_unc{args.weak_weight_final}'
+        args.job_type += f'_rmup{args.weak_weight_rampup_start}_{args.weak_weight_rampup_end}_l{args.weak_unc_lambda}'
     
     # saving dirs
     # for test only
