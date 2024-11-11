@@ -95,7 +95,7 @@ class SAM2Base(torch.nn.Module):
         )
         self.sam_prompt_fn = torch.nn.Linear(clip_embed_dim, self.sam_prompt_embed_dim, bias=True)
         self.sam_mask_decoder = MaskDecoder(
-            num_multimask_outputs=3,
+            num_multimask_outputs=2,
             transformer=TwoWayTransformer(
                 depth=2,
                 embedding_dim=self.sam_prompt_embed_dim,
@@ -124,7 +124,7 @@ class SAM2Base(torch.nn.Module):
         # for co-teaching
         if self.use_auxiliary_decoder==1:
             self.sam_mask_decoder_aux = MaskDecoder(
-                num_multimask_outputs=3,
+                num_multimask_outputs=2,
                 transformer=TwoWayTransformer(
                     depth=2,
                     embedding_dim=self.sam_prompt_embed_dim,
@@ -150,10 +150,9 @@ class SAM2Base(torch.nn.Module):
             )
             self.no_noise_mask_embed_aux = nn.Embedding(1, self.hidden_dim)
         elif self.use_auxiliary_decoder>1:
-            self.sam_mask_decoder_auxs, self.sam_noise_mask_downscaling_auxs, self.no_noise_mask_embed_auxs = {}, {}, {}
             for i in range(self.use_auxiliary_decoder):
                 sam_mask_decoder_aux = MaskDecoder(
-                    num_multimask_outputs=3,
+                    num_multimask_outputs=2,
                     transformer=TwoWayTransformer(
                         depth=2,
                         embedding_dim=self.sam_prompt_embed_dim,

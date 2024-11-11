@@ -137,7 +137,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         return masks, iou_predictions, precise_predictions, exist_predictions, img_feats, text_embeddings
     
 
-    def forward_decoder(self, img_feats, text_embeddings, n_classes, batch_size, use_aux=False):
+    def forward_decoder(self, img_feats, text_embeddings, n_classes, batch_size, use_aux=False, return_multiple=False):
         _, _, h, w = img_feats["image_embed"].shape   # [batch_size, 256, 16, 16]
         # noise mask embeddings
         if type(use_aux)==bool:
@@ -160,12 +160,13 @@ class SAM2ImageTrainer(pl.LightningModule):
             mask_decoder,
             img_feats, text_embeddings, noise_mask_embeddings,
             n_classes, batch_size,
-            high_res_key)
+            high_res_key,
+            return_multiple=return_multiple)
         
         return masks, iou_predictions, precise_predictions, exist_predictions
 
     
-    def forward_decoder_w_mask(self, noise_mask, img_feats, text_embeddings, use_aux=False):
+    def forward_decoder_w_mask(self, noise_mask, img_feats, text_embeddings, use_aux=False, return_multiple=False):
         n_classes = text_embeddings.shape[0]
         batch_size = noise_mask.shape[0]
         # prepare binary masks
@@ -183,7 +184,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         if type(use_aux)==bool:
             sam_noise_mask_downscaling = self.model.sam_noise_mask_downscaling_aux if use_aux else self.model.sam_noise_mask_downscaling
         else:
-            sam_noise_mask_downscaling = self.model.sam_noise_mask_downscaling_auxs[use_aux]
+            sam_noise_mask_downscaling = getattr(self.model, f'sam_noise_mask_downscaling_aux_{use_aux}') 
         noise_mask_embeddings = sam_noise_mask_downscaling(noise_mask)
 
         # make predictions
@@ -191,13 +192,14 @@ class SAM2ImageTrainer(pl.LightningModule):
             mask_decoder = self.model.sam_mask_decoder_aux if use_aux else self.model.sam_mask_decoder
             high_res_key = 'high_res_feats_aux' if use_aux else 'high_res_feats'
         else:
-            mask_decoder = self.model.sam_mask_decoder_auxs[use_aux]
+            mask_decoder = getattr(self.model, f'sam_mask_decoder_aux_{use_aux}')
             high_res_key = f'high_res_feats_aux_{use_aux}'
         masks, iou_predictions, precise_predictions, exist_predictions = self._pred_mask_and_iou(
             mask_decoder,
             img_feats, text_embeddings, noise_mask_embeddings,
             n_classes, batch_size,
-            high_res_key)
+            high_res_key,
+            return_multiple=return_multiple)
         
         return masks, iou_predictions, precise_predictions, exist_predictions
         
@@ -448,7 +450,7 @@ class SAM2ImageTrainer(pl.LightningModule):
 
 
     def _pred_mask_and_iou(self, decoder, img_feats, text_embeddings, noise_mask_embeddings,
-                           n_classes, batch_size, high_res_key='high_res_feats'):
+                           n_classes, batch_size, high_res_key='high_res_feats', return_multiple=False):
         # rearrange text embeddings
         text_embeddings = rearrange(text_embeddings.unsqueeze(0).expand(batch_size, -1, -1),
                                     'batch_size n_classes dim -> (n_classes batch_size) dim', 
@@ -467,26 +469,36 @@ class SAM2ImageTrainer(pl.LightningModule):
             text_embeddings=text_embeddings.unsqueeze(1),
             noise_mask_embeddings=noise_mask_embeddings,
             high_res_features=high_res_features,
+            multimask_output=return_multiple,
         )
 
+        # mask predictions
         # masks = (torch.clamp(masks, -32.0, 32.0) + 32.0)/64.0
-        masks = torch.clamp(masks, -32.0, 32.0)
-        masks = rearrange(torch.squeeze(masks, dim=1), 
-                          '(n_classes batch_size) H W -> batch_size n_classes H W',
-                          batch_size=batch_size,
-                          n_classes=n_classes)
-        
+        if return_multiple:
+            n_mask = masks.shape[1]
+            masks = rearrange(masks,
+                              '(n_classes batch_size) n_mask N H W -> n_mask batch_size n_classes H W',
+                              batch_size=batch_size,
+                              n_classes=n_classes,
+                              n_mask=n_mask)
+        else:
+            masks = torch.clamp(masks, -32.0, 32.0)
+            masks = rearrange(torch.squeeze(masks, dim=1), 
+                            '(n_classes batch_size) H W -> batch_size n_classes H W',
+                            batch_size=batch_size,
+                            n_classes=n_classes)
+            
         # accuracy predictions
-        iou_predictions = rearrange(torch.squeeze(iou_predictions, dim=1), 
+        iou_predictions = rearrange(iou_predictions[:,0], 
                                     '(n_classes batch_size) -> batch_size n_classes',
                                     batch_size=batch_size,
                                     n_classes=n_classes)
-        precise_predictions = rearrange(torch.squeeze(precise_predictions, dim=1), 
+        precise_predictions = rearrange(precise_predictions[:,0], 
                                         '(n_classes batch_size) -> batch_size n_classes',
                                         batch_size=batch_size,
                                         n_classes=n_classes)
         exist_predictions = torch.clamp(exist_predictions, -32.0, 32.0)
-        exist_predictions = rearrange(torch.squeeze(exist_predictions, dim=1),
+        exist_predictions = rearrange(exist_predictions[:,0],
                                       '(n_classes batch_size) -> batch_size n_classes',
                                       batch_size=batch_size,
                                       n_classes=n_classes)
@@ -599,7 +611,7 @@ class SAM2ImageTrainer(pl.LightningModule):
     def _calculate_loss(self, n_classes, y, y_exist=None, ious=None, precises=None,
                         mask_predictions=None, exist_predictions=None, 
                         iou_predictions=None, precise_predictions=None,
-                        class_weights=None, hete_uncertainty=None,
+                        class_weights=None, weights=None,
                         from_aux_decoder=False, log=True):
         aux_tag = '_aux' if from_aux_decoder else ''
 
@@ -612,14 +624,13 @@ class SAM2ImageTrainer(pl.LightningModule):
         y_one_hot = y_one_hot * mask
         y_one_hot_wnodata = y_one_hot * mask + (~mask) * MASK_CODE
         # get weights from hete_uncertainty
-        if hete_uncertainty is not None:  
-            weights_ = torch.exp(-hete_uncertainty)
-            weights = mask.float()*weights_
+        if weights is not None:  
+            weights = mask.float()*weights
             
         for w, k in zip([self.wdice, self.wfocal, self.wce], ['dice', 'focal', 'bce']):
             if w>0:
                 if k=='bce':
-                    reduce = 'mean' if hete_uncertainty is None else 'none'
+                    reduce = 'mean' if weights is None else 'none'
                     loss_ = w*F.binary_cross_entropy_with_logits(
                         mask_predictions, y_one_hot.float(), 
                         weight=mask.float(), 
@@ -629,7 +640,7 @@ class SAM2ImageTrainer(pl.LightningModule):
                     if reduce == 'none':
                         loss_ = (loss_*weights)[mask].mean()
                 elif k=='dice':
-                    if hete_uncertainty is None:
+                    if weights is None:
                         loss_ = w*dice_loss(
                             mask_predictions, y, 
                             average='macro', weight=class_weights,
@@ -641,7 +652,7 @@ class SAM2ImageTrainer(pl.LightningModule):
                                                   class_weights=class_weights,)
                     loss_ = loss_ * n_classes
                 elif k=='focal':
-                    reduce = 'mean' if hete_uncertainty is None else 'none'
+                    reduce = 'mean' if weights is None else 'none'
                     loss_ = w*binary_focal_loss_with_logits(
                         mask_predictions, y_one_hot_wnodata,
                         reduction=reduce, pos_weight=class_weights,
@@ -654,7 +665,7 @@ class SAM2ImageTrainer(pl.LightningModule):
 
         # multi-class loss
         if self.use_multiclass_loss:
-            if hete_uncertainty is None:
+            if weights is None:
                 for L, w in zip([self.DLoss, self.FLoss, self.CELoss], [self.wdice, self.wfocal, self.wce]):
                     if w>0:
                         loss_ = w*L(mask_predictions, y.clone())  # otherwise encounter the error: RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.LongTensor [6, 256, 256]] is at version 2; expected version 0 instead.

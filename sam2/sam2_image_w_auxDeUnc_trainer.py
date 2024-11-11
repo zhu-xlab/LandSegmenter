@@ -7,6 +7,13 @@ from sam2.sam2_image_trainer import SAM2ImageTrainer as BaseTrainer
 from sam2.sam2_image_trainer import MASK_CODE
 
 
+def get_logvar_smooth_layer(kernel_size=5):
+    smooth_logvar = torch.nn.Conv2d(1, 1, kernel_size=kernel_size)
+    smooth_logvar.weight.data.fill_(1/25)
+    smooth_logvar.bias.data.fill_(0)
+    return smooth_logvar
+
+
 class SAM2ImageTrainerAuxUnc(BaseTrainer):
     def __init__(self, 
                  args,
@@ -14,15 +21,21 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
         super().__init__(args)
 
         assert self.model.use_auxiliary_decoder, "Model must have an auxiliary decoder."
-        self.use_noise_mask_loss = args.use_noise_mask_loss
+        # self.use_noise_mask_loss = args.use_noise_mask_loss
         # rampup parameters for dynamically setting weak weight
         self.rampup_end = args.weak_weight_rampup_end
         self.rampup_start = args.weak_weight_rampup_start
         self.rampup_length = self.rampup_end - self.rampup_start
         self.weak_weight_final = args.weak_weight_final
         self.unc_lambda = args.weak_unc_lambda
+        # # layers for smoothing logvar outputs
+        self.smooth_logvar = get_logvar_smooth_layer(kernel_size=5)
+        self.smooth_logvar_aux = get_logvar_smooth_layer(kernel_size=5)
+        self.alpha = 0.5 # proportion of logvar(x) in logvar(x,y)
         # self.dropout_rate = args.dropout_rate
-        # if self.dropout_rate>0: self.dropout = torch.nn.Dropout(p=self.dropout_rate)
+        # if self.dropout_rate>0: 
+        #     self.dropout = torch.nn.Dropout(p=self.dropout_rate)
+        #     self.dropout_n = args.dropout_n
         # test settings
         self.test_only = args.test_only
         if self.test_only:
@@ -57,60 +70,88 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
             text_embeddings = self._get_text_embeddings(prompt_token)
 
             # classification predictions
-            masks, iou_predictions, precise_predictions, exist_predictions = \
-                self.forward_decoder(img_feats, text_embeddings, n_class, x.shape[0])
+            masks_, iou_predictions, precise_predictions, exist_predictions = \
+                self.forward_decoder(img_feats, text_embeddings, n_class, x.shape[0],
+                                     return_multiple=True)
+            masks, logvar = masks_[0], masks_[1]
+            masks = torch.clamp(masks, -32.0, 32.0)
+            logvar = self.smooth_logvar(logvar)
+            logvar = torch.where(logvar.isnan()+logvar.isinf(), 32.0, torch.clamp(logvar, 0, 32.0))
             
-            # # TBD: dropout
+            # # dropout
             # if self.dropout_rate>0:
-            #     img_feats_list = []
-            #     for i in range(self.dropout_n):
-            #         img_feats_ = F.dropout(img_feats)
-            #         img_feats_list.append(img_feats_)
+            #     image_embed = img_feats['image_embed']
+            #     image_embed_dropout = []
+            #     for _ in range(self.dropout_n):
+            #         image_embed_dropout_ = self.dropout(image_embed)
+            #         image_embed_dropout.append(image_embed_dropout_)
+            #     img_feats['image_embed'] = sum(image_embed_dropout) / self.dropout_n
 
             if if_weak_lbl:
                 precises, ious =  None, None
-                # uncertainty predictions
-                hetero_uncs_, _, _, _ = \
-                    self.forward_decoder_w_mask(y, img_feats, text_embeddings, use_aux=True)
-                hetero_uncs = F.relu(hetero_uncs_)
+                y_input = y.clone()
             else:
                 precises, ious = self._get_accs(masks.detach(), y)
+                preds = F.argmax(masks.detach(), dim=1)
+                y_input = F.one_hot(preds, num_classes=n_class).permute(0, 3, 1, 2)
+
+            # uncertainty predictions
+            aux_masks_, _, _, _ = \
+                self.forward_decoder_w_mask(y_input, img_feats, text_embeddings, use_aux=True, return_multiple=True)
+            masks_xy, logvar_xy = aux_masks_[0], aux_masks_[1]
+            masks_xy = torch.clamp(masks_xy, -32.0, 32.0)
+            logvar_xy = self.smooth_logvar(logvar_xy)
+            logvar_xy = torch.where(logvar_xy.isnan()+logvar_xy.isinf(), 32.0, torch.clamp(logvar_xy, 0, 32.0))
         
             # calculate losses 
-            # part 1: normal loss for main branch only
             class_weights = self.class_weight_tensors[name_key] if self.use_class_weights else None
-            loss_ = self._calculate_loss(n_class, y, y_exist, ious, precises, 
-                                         masks, exist_predictions, iou_predictions, precise_predictions,
-                                         class_weights=class_weights, 
-                                         from_aux_decoder=False, log=log_insides_func,
-                                         )
+            # part 1: normal loss for main branch only
+            if if_weak_lbl or self.weak_weight<1:
+                loss_ = self._calculate_loss(n_class, y, y_exist, ious, precises, 
+                                            masks, exist_predictions, iou_predictions, precise_predictions,
+                                            class_weights=class_weights, 
+                                            from_aux_decoder=False, log=log_insides_func,
+                                            )
+            else:
+                loss_ = torch.tensor(0., device=self.device)
             
-            # part 2: weak label loss with estimated uncertainty from aux decoder
+            # part 2: similarity loss between means (mu_x/masks and mu_xy/masks_xy)
+            loss_mu = F.mse_loss(masks.detach(), masks_xy, reduction='mean')
+            
+            # part 3: weak label loss with estimated uncertainty from aux decoder
             y_valid = (y!=MASK_CODE).unsqueeze(1).expand_as(masks)
+            # s_y = log(e^s0-alpha*e^s)-log(1-alpha)
+            s_y = torch.log(torch.exp(logvar_xy) - self.alpha*torch.exp(logvar))-torch.log(1-self.alpha)
+            s_y = torch.where(s_y.isnan()+s_y.isinf(), 32.0, torch.clamp(s_y, 0, 32.0))
+            w_pos = torch.exp(-s_y)
+            # pseudo labels
+            masks_mean = ((masks.detach()+masks_xy.detach())/2)
+            y_preds = F.argmax(masks_mean, dim=1)
+            consist_mask = y_preds==y  # 1: pred==y, 0: pred!=y
+            # weights from uncertainty
+            weights = w_pos * consist_mask + (1-w_pos) * (~consist_mask)
+
             if if_weak_lbl and self.weak_weight>0:
                 weak_loss_ = self._calculate_loss(n_class, y, y_exist, ious, precises, 
                                                   masks, exist_predictions, iou_predictions, precise_predictions,
-                                                  class_weights=class_weights, hete_uncertainty=hetero_uncs,
+                                                  class_weights=class_weights, weights=weights,
                                                   from_aux_decoder=False, log=log_insides_func,
                                                   )
-                unc_loss_ = self.unc_lambda*hetero_uncs[y_valid].mean()
+                unc_loss_ = self.unc_lambda*s_y[y_valid].mean()
                 loss_ = (1-self.weak_weight)*loss_ + self.weak_weight*(weak_loss_+unc_loss_)
             elif not if_weak_lbl:
                 # for exact labels
-                y_pred = (masks.detach()>0).to(y.dtype)
-                hetero_unc_gt, _, _, _ = \
-                    self.forward_decoder_w_mask(y_pred, img_feats, text_embeddings, use_aux=True)
-                unc_loss = self.unc_lambda*self._get_uncertainty_loss_for_predictions(y_pred, y, hetero_unc_gt)
+                unc_loss = self.unc_lambda*self._get_uncertainty_loss_for_predictions(y_preds, y, s_y)
                 if log_insides_func:
                     self.log('tr_loss_gt_unc', unc_loss, on_epoch=True, on_step=False, sync_dist=True)
                 loss_ = loss_ + unc_loss
 
             # training image examples  
             if batch_idx<2 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
-                self._log_imgs(f'tr_{name_key}', x[0], masks[0], y[0], hetero_uncs[0] if if_weak_lbl else hetero_unc_gt[0])
+                self._log_imgs(f'tr_{name_key}', x[0], masks[0], y[0], s_y[0])
             
             # losses.append(loss)
-            loss = loss + loss_
+            loss = loss + loss_ + loss_mu
             # self.log(f'tr{counter_pref}_loss_{name_key}', loss, on_epoch=True, on_step=True, sync_dist=True, batch_size=x.shape[0])
         
         # total loss

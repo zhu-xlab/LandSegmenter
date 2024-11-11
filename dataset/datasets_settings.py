@@ -196,20 +196,20 @@ class_names = {
 
     # # # # # # # # test sets # # # # # # # #
     'multisenge': {
-        0: ['Dense built-up areas'],
-        1: ['Sparse built-up areas'],
-        2: ['Specialized built-Up Areas'],
-        3: ['Specialized but vegetative areas'],
-        4: ['Large scale networks'],
-        5: ['Arable lands'],
-        6: ['Vineyards'],
-        7: ['Orchards'],
-        8: ['Grasslands'],
-        9: ['Groces or hedges'],
-        10:['Forests'],
-        11:['Open spaces or mineral site'],
-        12:['Wetlands'],
-        13:['Water surfaces'],
+        0: ['built-up high-intensity imperious area'],  # Dense built-up areas
+        1: ['built-up low-intensity imperious area'],   # sparely built-up areas
+        2: ['industrial, commercial and transportation area'],              # Specialized built-Up Areas
+        3: ['artificial, non-argricultural vegetation'],     # Specialized but vegetative areas     
+        4: ['transportation area'],       # Large scale networks
+        5: ['arable lands'],
+        6: ['vineyards'],
+        7: ['orchards'],
+        8: ['grasslands'],
+        9: ['shrub and scrub'],
+        10:['forest'],
+        11:['bare land'],
+        12:['wetland'],
+        13:['water'],
     },
 
     # # # # # these two correspond to the visualization order not the order saved in lmdb # # # # #
@@ -247,32 +247,32 @@ class_names = {
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
     'dw': {
-        0: ['Water', 'Open water', 'Aquatic surface', 'Waterbody', 'Lake and river', 'Hydric zone', 'Aquatic zone', 'Marine and freshwater area'],
-        1: ['Tree', 'Forest', 'Woodland', 'Canopy', 'Timberland', 'Forested area', 'Arboreal zone'],
-        2: ['Grass', 'Grassland', 'Prairie', 'Savanna', 'Pastureland', 'Herbaceous cover'],
-        3: ['Flooded vegetation', 'Wetland vegetation', 'Marshland', 'Swamp plant', 'Riparian area', 'Aquatic vegetation'], 
-        4: ['Crop', 'Farmland', 'Agricultural field', 'Cultivated land', 'Arable land', 'Cropland'],
-        5: ['Shrub and Scrub', 'Shrubland', 'Heath', 'Brushland', 'Chaparral', 'Low vegetation'],
-        6: ['Built area', 'Urban area', 'Developed land', 'Residential and commercial zone', 'Infrastructure', 'Built-up land'],
-        7: ['Bare land', 'Barren terrain', 'Open soil', 'Unvegetated land', 'Exposed earth'],
-        8: ['Ice and Snow', 'Glacial area', 'Snow cover', 'Ice field', 'Frozen surface'],
+        0: ['water', 'Open water', 'Aquatic surface', 'Waterbody', 'Lake and river', 'Hydric zone', 'Aquatic zone', 'Marine and freshwater area'],
+        1: ['tree', 'Forest', 'Woodland', 'Canopy', 'Timberland', 'Forested area', 'Arboreal zone'],
+        2: ['grass', 'Grassland', 'Prairie', 'Savanna', 'Pastureland', 'Herbaceous cover'],
+        3: ['wetland', 'Flooded vegetation', 'Wetland vegetation', 'Marshland', 'Swamp plant', 'Riparian area', 'Aquatic vegetation'], 
+        4: ['crop', 'Farmland', 'Agricultural field', 'Cultivated land', 'Arable land', 'Cropland'],
+        5: ['shrub and scrub', 'Shrubland', 'Heath', 'Brushland', 'Chaparral', 'Low vegetation'],
+        6: ['built-up area', 'Urban area', 'Developed land', 'Residential and commercial zone', 'Infrastructure', 'Built-up land'],
+        7: ['bare land', 'Barren terrain', 'Open soil', 'Unvegetated land', 'Exposed earth'],
+        8: ['ice and snow', 'Glacial area', 'Snow cover', 'Ice field', 'Frozen surface'],
         9: ['Cloud', 'Cloud cover', 'Cloudy sky', 'Cloud layer', 'Cloud formation'],
     },
 
     'osm':{
-        0: ['Urban fabric'],
-        1: ['Arable land'],
-        2: ['Forest'],
-        3: ['Industrial, commercial and transport'],
-        4: ['Artificial, non-argricultural vegetation'],
-        5: ['Mine, dump and construction sites'],
-        6: ['Pastureland'],
-        7: ['Permanent crops'],
-        8: ['Waterbody'],
-        9: ['Open spaces'],
-        10:['Shrub and herbaceous vegetation associations'],
-        11:['Wetlands'],
-        12:['Coastal wetlands'],
+        0: ['residential area'],
+        1: ['arable land'],
+        2: ['forest'],
+        3: ['industrial, commercial and transportation area'],
+        4: ['artificial, non-argricultural vegetation'],
+        5: ['mine, dump and construction sites'],
+        6: ['pasture'],
+        7: ['permanent crops'],
+        8: ['water'],
+        9: ['bare land'],
+        10:['shrub and herbaceous vegetation'],
+        11:['inland wetland'],
+        12:['coastal wetland'],
     },
 
 }

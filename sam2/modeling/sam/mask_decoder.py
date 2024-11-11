@@ -149,15 +149,15 @@ class MaskDecoder(nn.Module):
         )
 
         # Select the correct mask or masks for output
-        if multimask_output:
-            masks = masks[:, 1:, :, :]
-            iou_pred = iou_pred[:, 1:]
-            precise_pred = precise_pred[:, 1:]
-            exist_pred = exist_pred[:, 1:]
-        elif self.dynamic_multimask_via_stability and not self.training:
-            print('wrong if', self.dynamic_multimask_via_stability, self.training)
-            masks, iou_pred = self._dynamic_multimask_via_stability(masks, iou_pred)
-        else:   # multimask_output=False
+        # if multimask_output:  output all masks (n=2 in our case, =3 by default in sam2)
+        #     masks = masks[:, 1:, :, :]
+        #     iou_pred = iou_pred[:, 1:]
+        #     precise_pred = precise_pred[:, 1:]
+        #     exist_pred = exist_pred[:, 1:]
+        # elif self.dynamic_multimask_via_stability and not self.training:
+        #     print('wrong if', self.dynamic_multimask_via_stability, self.training)
+        #     masks, iou_pred = self._dynamic_multimask_via_stability(masks, iou_pred)
+        if multimask_output==False:
             masks = masks[:, 0:1, :, :]
             iou_pred = iou_pred[:, 0:1]
             precise_pred = precise_pred[:, 0:1]
@@ -223,7 +223,7 @@ class MaskDecoder(nn.Module):
             )
         hyper_in = torch.stack(hyper_in_list, dim=1)
         b, c, h, w = upscaled_embedding.shape
-        masks = (hyper_in @ upscaled_embedding.view(b, c, h * w)).view(b, -1, h, w)
+        masks = (hyper_in @ upscaled_embedding.view(b, c, h * w)).view(b, -1, h, w)  # upscaled_embedding: upscaled low-level features
 
         # Generate mask quality predictions
         iou_pred = self.iou_prediction_head(iou_token_out)

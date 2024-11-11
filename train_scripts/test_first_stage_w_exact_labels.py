@@ -18,7 +18,7 @@ from sam2.sam2_image_w_auxDe_trainer import SAM2ImageTrainerAux
 
 # dataset
 from dataset.datasets_settings import datasets_settings_test
-from dataset import DWOSMDataset, OpenEarthMapDataset, SegAugTransforms
+from dataset import DWOSMDataset, OpenEarthMapDataset, MultiSenGeDataset
 import albumentations as A
 
 
@@ -42,12 +42,20 @@ def main():
         test_dataset = DWOSMDataset(datasets_settings_test['dw']['data_path'],
                                     mode=datasets_settings_test['dw']['mode'],
                                     n_bands=datasets_settings_test['dw']['n_channels'],
-                                    transform=SegAugTransforms(trans_ts))
-    else:
+                                    transform=trans_ts)
+    elif args.dataset_name == 'openearthmap':
         test_dataset = OpenEarthMapDataset(datasets_settings_test['openearthmap']['data_path'],
-                                        transform=SegAugTransforms(trans_ts))
+                                           transform=trans_ts)
+    elif args.dataset_name == 'multisenge':
+        test_dataset = MultiSenGeDataset(datasets_settings_test['multisenge']['data_path'],
+                                         transform=trans_ts)
+    elif args.dataset_name == 'osm':
+        test_dataset = DWOSMDataset(datasets_settings_test['osm']['data_path'],
+                                    mode=datasets_settings_test['osm']['mode'],
+                                    n_bands=datasets_settings_test['osm']['n_channels'],
+                                    lbl_type='osm')
     test_loader = DataLoader(test_dataset, batch_size=args.tbs, num_workers=args.num_workers,
-                            pin_memory=True, shuffle=False, drop_last=False)
+                             pin_memory=True, shuffle=False, drop_last=False)
     args.n_batch_tr = len(test_loader)
 
     # saving path

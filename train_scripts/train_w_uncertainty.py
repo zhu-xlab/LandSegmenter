@@ -16,9 +16,8 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from train_scripts.get_args import get_args_train_w_unc as get_args
-from sam2.sam2_image_trainer import SAM2ImageTrainer
 from sam2.sam2_image_w_auxDeUnc_trainer import SAM2ImageTrainerAuxUnc
-from sam2.sam2_image_w_sepAuxDe4Weak_trainer import SAM2ImageTrainerSepAuxDe4Weak
+from sam2.sam2_image_w_sepAuxDe4WeakUnc_trainer import SAM2ImageTrainerSepAuxDe4WeakUnc
 
 # dataset
 from dataset.get_combined_datasets import load_combined_datasets, get_datasets_train, MyDistributedBatchSampler
@@ -131,8 +130,7 @@ def main():
     ###### 3 - define the model ######
     torch.set_float32_matmul_precision('high')
     if args.use_sep_aux_de_weak:
-        # model = SAM2ImageTrainerSepAuxDe4Weak(args)
-        raise NotImplementedError
+        model = SAM2ImageTrainerSepAuxDe4WeakUnc(args)
     elif args.use_aux_decoder:
         model = SAM2ImageTrainerAuxUnc(args)
     else:
