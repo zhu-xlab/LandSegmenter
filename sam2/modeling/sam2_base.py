@@ -15,18 +15,20 @@ from torch.nn.init import trunc_normal_
 from sam2.modeling.sam.mask_decoder import MaskDecoder
 from sam2.modeling.sam.prompt_encoder import PromptEncoderCLIP
 from sam2.modeling.sam.transformer import TwoWayTransformer
-from sam2.modeling.sam2_utils import LayerNorm2d
+from sam2.modeling.sam2_utils import LayerNorm2d, get_logvar_smooth_layer
 # from sam2.modeling.sam2_utils import get_1d_sine_pe, MLP, select_closest_cond_frames
 
 # a large negative value as a placeholder score for missing objects
 NO_OBJ_SCORE = -1024.0
-
+NUM_MULTIOUTPUTS = 3
 
 class SAM2Base(torch.nn.Module):
     def __init__(
         self,
         image_encoder,
         use_auxiliary_decoder=False,
+        use_logvar_smooth=False,
+        fix_logvar_smooth=False,
         image_size=512,
         backbone_stride=16,  # stride of the image backbone output
         use_high_res_features_in_sam=False,
@@ -69,6 +71,11 @@ class SAM2Base(torch.nn.Module):
                 fullgraph=True,
                 dynamic=False,
             )
+        
+        # logvar smooth layer
+        self.use_logvar_smooth = use_logvar_smooth
+        if self.use_logvar_smooth:
+            self.logvar_smoother = get_logvar_smooth_layer(kernel_size=3, n_depth=2, no_grads=fix_logvar_smooth)           
 
 
     def forward(self, *args, **kwargs):
@@ -95,7 +102,7 @@ class SAM2Base(torch.nn.Module):
         )
         self.sam_prompt_fn = torch.nn.Linear(clip_embed_dim, self.sam_prompt_embed_dim, bias=True)
         self.sam_mask_decoder = MaskDecoder(
-            num_multimask_outputs=2,
+            num_multimask_outputs=NUM_MULTIOUTPUTS,
             transformer=TwoWayTransformer(
                 depth=2,
                 embedding_dim=self.sam_prompt_embed_dim,
@@ -124,7 +131,7 @@ class SAM2Base(torch.nn.Module):
         # for co-teaching
         if self.use_auxiliary_decoder==1:
             self.sam_mask_decoder_aux = MaskDecoder(
-                num_multimask_outputs=2,
+                num_multimask_outputs=NUM_MULTIOUTPUTS,
                 transformer=TwoWayTransformer(
                     depth=2,
                     embedding_dim=self.sam_prompt_embed_dim,
@@ -152,7 +159,7 @@ class SAM2Base(torch.nn.Module):
         elif self.use_auxiliary_decoder>1:
             for i in range(self.use_auxiliary_decoder):
                 sam_mask_decoder_aux = MaskDecoder(
-                    num_multimask_outputs=2,
+                    num_multimask_outputs=NUM_MULTIOUTPUTS,
                     transformer=TwoWayTransformer(
                         depth=2,
                         embedding_dim=self.sam_prompt_embed_dim,

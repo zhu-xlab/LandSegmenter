@@ -85,6 +85,25 @@ def get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
 
+def get_logvar_smooth_layer(kernel_size=3, n_depth=2, no_grads=False):
+    layers = []
+    for _ in range(n_depth):
+        conv = torch.nn.Conv2d(1, 1, kernel_size=kernel_size, padding=kernel_size//2, bias=True)
+        conv.weight.data.fill_(1/kernel_size**2)
+        conv.bias.data.fill_(0)
+        layers.append(conv)
+    
+    smooth_logvar = torch.nn.Sequential(*layers)
+    
+    if no_grads:
+        print("Setting no_grads for logvar smooth layers")
+        for layer in smooth_logvar:
+            layer.weight.requires_grad = False
+            layer.bias.requires_grad = False
+    
+    return smooth_logvar
+
+
 class DropPath(nn.Module):
     # adapted from https://github.com/huggingface/pytorch-image-models/blob/main/timm/layers/drop.py
     def __init__(self, drop_prob=0.0, scale_by_keep=True):

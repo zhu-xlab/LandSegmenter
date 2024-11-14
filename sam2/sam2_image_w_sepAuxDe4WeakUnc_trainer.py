@@ -84,8 +84,8 @@ class SAM2ImageTrainerSepAuxDe4WeakUnc(BaseTrainer):
                 # uncertainty predictions
                 hetero_uncs_, _, _, _ = \
                     self.forward_decoder_w_mask(y, img_feats, text_embeddings, use_aux=aux)
-                hetero_uncs = F.relu(hetero_uncs_)
-                hetero_uncs = torch.where(hetero_uncs.isnan()+hetero_uncs.isinf(), 32, hetero_uncs)
+                hetero_uncs = F.relu(hetero_uncs_, inplace=False)
+                # hetero_uncs[hetero_uncs.isnan()+hetero_uncs.isinf()] = 32.0
             else:
                 # if it's exact labels, skip
                 precises, ious = self._get_accs(masks.detach(), y)

@@ -5,7 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 
 
-import logging
 import wandb
 import random
 
@@ -81,6 +80,12 @@ class SAM2ImageTrainer(pl.LightningModule):
         else:
             assert args.dofa_lr_scale==1, f'dofa_lr_scale={args.dofa_lr_scale}, but dofa_unfix_weights is False!'
         self.dofa_lr_scale = args.dofa_lr_scale
+        # logvar smoother
+        self.use_logvar_smooth = args.use_logvar_smooth
+        if args.use_logvar_smooth:
+            hydra_overrides_extra += ['++model.use_logvar_smooth=True']
+            if args.fix_logvar_smooth:
+                hydra_overrides_extra += ['++model.fix_logvar_smooth=True']
         self.model = build_sam2(args.config_file, args.ckpt_path, args.ckpt_path_clip, 
                                 load_decoder_weights=args.load_de,
                                 load_aux_decoder_weights=args.load_aux_de,
@@ -95,7 +100,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         ]
 
         # others TO BE DEFINED
-        self.multimask_output = False
+        # self.multimask_output = False
         self.tokenizer = SimpleTokenizer()
         self.share_connect = args.share_connect
         # self.n_prompts = args.n_prompts if type(args.n_prompts)==type([]) else [args.n_prompts]
@@ -137,14 +142,17 @@ class SAM2ImageTrainer(pl.LightningModule):
         return masks, iou_predictions, precise_predictions, exist_predictions, img_feats, text_embeddings
     
 
-    def forward_decoder(self, img_feats, text_embeddings, n_classes, batch_size, use_aux=False, return_multiple=False):
+    def forward_decoder(self, img_feats, text_embeddings, n_classes, batch_size, use_aux=False, return_multiple=False, one_no_noise_mask_embed=False):
         _, _, h, w = img_feats["image_embed"].shape   # [batch_size, 256, 16, 16]
         # noise mask embeddings
-        if type(use_aux)==bool:
-            no_noise_mask_embed = self.model.no_noise_mask_embed_aux if use_aux else self.model.no_noise_mask_embed
+        if one_no_noise_mask_embed:
+            no_noise_mask_embed = self.model.no_noise_mask_embed
         else:
-            assert type(use_aux)==int, 'use_aux should be either boolean or integer!'
-            no_noise_mask_embed = getattr(self.model, f'no_noise_mask_embed_aux_{use_aux}') 
+            if type(use_aux)==bool:
+                no_noise_mask_embed = self.model.no_noise_mask_embed_aux if use_aux else self.model.no_noise_mask_embed
+            else:
+                assert type(use_aux)==int, 'use_aux should be either boolean or integer!'
+                no_noise_mask_embed = getattr(self.model, f'no_noise_mask_embed_aux_{use_aux}') 
         noise_mask_embeddings = no_noise_mask_embed.weight.reshape(1, -1, 1, 1).expand(
             n_classes*batch_size, -1, h, w
             )
@@ -465,7 +473,6 @@ class SAM2ImageTrainer(pl.LightningModule):
         # get predictions
         masks, iou_predictions, precise_predictions, exist_predictions = decoder(
             image_embeddings=img_feats["image_embed"].repeat(n_classes, 1, 1, 1),
-            multimask_output=self.multimask_output,
             text_embeddings=text_embeddings.unsqueeze(1),
             noise_mask_embeddings=noise_mask_embeddings,
             high_res_features=high_res_features,
@@ -477,7 +484,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         if return_multiple:
             n_mask = masks.shape[1]
             masks = rearrange(masks,
-                              '(n_classes batch_size) n_mask N H W -> n_mask batch_size n_classes H W',
+                              '(n_classes batch_size) n_mask H W -> n_mask batch_size n_classes H W',
                               batch_size=batch_size,
                               n_classes=n_classes,
                               n_mask=n_mask)
@@ -611,7 +618,7 @@ class SAM2ImageTrainer(pl.LightningModule):
     def _calculate_loss(self, n_classes, y, y_exist=None, ious=None, precises=None,
                         mask_predictions=None, exist_predictions=None, 
                         iou_predictions=None, precise_predictions=None,
-                        class_weights=None, weights=None,
+                        class_weights=None, weights_list=None,
                         from_aux_decoder=False, log=True):
         aux_tag = '_aux' if from_aux_decoder else ''
 
@@ -624,8 +631,12 @@ class SAM2ImageTrainer(pl.LightningModule):
         y_one_hot = y_one_hot * mask
         y_one_hot_wnodata = y_one_hot * mask + (~mask) * MASK_CODE
         # get weights from hete_uncertainty
-        if weights is not None:  
-            weights = mask.float()*weights
+        if weights_list is not None:  
+            weights = mask.float()*weights_list[0]
+            pixel_weights_mean = mask.float()[:,0]*weights_list[1]
+        else:
+            weights = None
+
             
         for w, k in zip([self.wdice, self.wfocal, self.wce], ['dice', 'focal', 'bce']):
             if w>0:
@@ -673,7 +684,7 @@ class SAM2ImageTrainer(pl.LightningModule):
                     else:
                         continue
             else:
-                pixel_weights_mean = weights.mean(axis=1)
+                # pixel_weights_mean = weights.mean(axis=1)
                 for w, k in zip([self.wdice, self.wfocal, self.wce], ['dice', 'focal', 'ce']):
                     if k == 'ce':
                         loss_ = F.cross_entropy(mask_predictions, y, ignore_index=MASK_CODE, reduction='none')

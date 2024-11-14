@@ -38,10 +38,15 @@ def get_args_train_w_unc():
     parser.add_argument('--max_dataset_size', type=int, default=None, help='Maximum number of samples used for training')
 
     # uncertainty settings
+    parser.add_argument('--use_no_weak_labels_as_logvar_input', dest='no_weak_input', action='store_true', default=False, help='Whether to use weak labels as logvar input or not')
     parser.add_argument('--weak_weight_rampup_end', type=int, default=100, help='Number of epochs for weak weight rampup')
     parser.add_argument('--weak_weight_rampup_start', type=int, default=0, help='Number of epochs for weak weight rampup')
     parser.add_argument('--weak_weight_final', type=float, default=1.0, help='Final weight of weak loss')
     parser.add_argument('--weak_uncertainty_lambda', dest='weak_unc_lambda', type=float, default=1.0, help='Weight of weak uncertainty scale loss')
+
+    # logvar smoother settings
+    parser.add_argument('--use_logvar_smooth', action='store_true', default=False, help='Whether to use logvar smoother or not')
+    parser.add_argument('--fix_logvar_smooth', action='store_true', default=False, help='Whether to fix logvar smoother or not if using logvar smoother')
 
     # get common arguments
     parser = get_common_args(parser)
@@ -134,6 +139,7 @@ def get_common_args(parser):
     parser.add_argument('--use-separate-auxiliary-decoder-for-weak-labels', dest='use_sep_aux_de_weak', action='store_true', default=False, help='Whether to use separate auxiliary decoder for each weakly labeled dataset or not')
     parser.add_argument('--use-auxiliary-decoder', dest='use_aux_decoder', action='store_true', default=False, help='Whether to use auxiliary decoder (double decoders) or not')
     parser.add_argument('--share-short-connect-weights', dest='share_connect', action='store_true', default=False, help='Whether to share short connection weights or not when using auxiliary decoder')
+    # parser.add_argument('--number_of_multiple_outputs', dest='n_mout', type=int, default=3, help='Number of multiple outputs')
     parser.add_argument('--use-noise-mask-loss', action='store_true', default=False, help='Whether to use the mask and eixstance mask on the branch where noise mask is used as input')
     parser.add_argument('--mute-adaptor', action='store_true', default=False, help='Whether to use adaptor or not')
     parser.add_argument('--dofa-type', type=str, default=None, choices=['vit_base_patch16', 'vit_large_patch16', 'None'], help='Type of DoFA model to use. Default is None (not using dofa).')
@@ -168,6 +174,8 @@ def get_common_args(parser):
     # for test
     parser.add_argument('--test_only', action='store_true', default=False, help='Only test models.')
     parser.add_argument('--test_weight_path', dest='ts_wpath', type=str, default=None, help='Path of test model weights.')
+    # for debugging tag
+    parser.add_argument('--debug', type=str, default='', help='Debugging tag')
     return parser
 
 
@@ -213,6 +221,8 @@ def set_log_files(args, w_unc=False):
         args.gname += '_deN'
     # using multiclass loss or not
     args.gname += '_mcloss' if args.use_multiclass_loss else ''
+    # # # # # # For debugging stage # # # # # 
+    # args.gname += 'new' 
         
     # job type
     args.job_type = f'{int(args.wfocal)}F_{int(args.wdice)}D_{int(args.wce)}C' 
@@ -241,7 +251,12 @@ def set_log_files(args, w_unc=False):
     if w_unc:
         args.gname += f'_unc{args.weak_weight_final}'
         args.job_type += f'_rmup{args.weak_weight_rampup_start}_{args.weak_weight_rampup_end}_l{args.weak_unc_lambda}'
-    
+        args.gname += '_wowl' if args.no_weak_input else ''
+        if args.use_logvar_smooth:
+            args.job_type += '_fsmt' if args.fix_logvar_smooth else '_asmt'
+    # # for debugging tag
+    # args.job_type += args.debug
+
     # saving dirs
     # for test only
     if args.test_only: 

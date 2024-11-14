@@ -3,6 +3,7 @@ import torch
 import wandb
 import numpy as np
 import torch.nn.functional as F
+from einops import rearrange
 from sam2.sam2_image_trainer import SAM2ImageTrainer as BaseTrainer
 from sam2.sam2_image_trainer import MASK_CODE
 
@@ -21,6 +22,11 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
         self.rampup_length = self.rampup_end - self.rampup_start
         self.weak_weight_final = args.weak_weight_final
         self.unc_lambda = args.weak_unc_lambda
+        self.no_weak_input = args.no_weak_input
+        # logvar smooth layer
+        # v1: no_grads=True, fixsmt, but debug-tag=adaptsmt
+        # v2: no_grads=False, realadaptsmt
+        # self.smooth_logvar = get_logvar_smooth_layer(kernel_size=3, n_depth=2, no_grads=False)
         # self.dropout_rate = args.dropout_rate
         # if self.dropout_rate>0: 
         #     self.dropout = torch.nn.Dropout(p=self.dropout_rate)
@@ -74,9 +80,7 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
             if if_weak_lbl:
                 precises, ious =  None, None
                 # uncertainty predictions
-                hetero_uncs_, _, _, _ = \
-                    self.forward_decoder_w_mask(y, img_feats, text_embeddings, use_aux=True)
-                hetero_uncs = F.relu(hetero_uncs_)
+                hetero_uncs = self._get_hetero_uncertainty(y, img_feats, text_embeddings)
             else:
                 precises, ious = self._get_accs(masks.detach(), y)
         
@@ -92,10 +96,11 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
             # part 2: weak label loss with estimated uncertainty from aux decoder
             y_valid = (y!=MASK_CODE).unsqueeze(1).expand_as(masks)
             if if_weak_lbl and self.weak_weight>0:
-                weights = torch.exp(-hetero_uncs)
+                weights_cls = torch.exp(-hetero_uncs)
+                weights_avg = weights_cls.mean(dim=1)
                 weak_loss_ = self._calculate_loss(n_class, y, y_exist, ious, precises, 
                                                   masks, exist_predictions, iou_predictions, precise_predictions,
-                                                  class_weights=class_weights, weights=weights,
+                                                  class_weights=class_weights, weights_list=[weights_cls, weights_avg],
                                                   from_aux_decoder=False, log=log_insides_func,
                                                   )
                 unc_loss_ = self.unc_lambda*hetero_uncs[y_valid].mean()
@@ -103,8 +108,7 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
             elif not if_weak_lbl:
                 # for exact labels
                 y_pred = (masks.detach()>0).to(y.dtype)
-                hetero_unc_gt, _, _, _ = \
-                    self.forward_decoder_w_mask(y_pred, img_feats, text_embeddings, use_aux=True)
+                hetero_unc_gt = self._get_hetero_uncertainty(y_pred, img_feats, text_embeddings)
                 unc_loss = self.unc_lambda*self._get_uncertainty_loss_for_predictions(y_pred, y, hetero_unc_gt)
                 if log_insides_func:
                     self.log('tr_loss_gt_unc', unc_loss, on_epoch=True, on_step=False, sync_dist=True)
@@ -254,3 +258,24 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
             log_imgs.append(unc_img)
             # log_imgs.append(weight_img)
         wandb.log({prefix:log_imgs})
+    
+    def _get_hetero_uncertainty(self, y, img_feats, text_embeddings):
+        if not self.no_weak_input:
+            # print("use weak input")
+            hetero_uncs_, _, _, _ = \
+                        self.forward_decoder_w_mask(y, img_feats, text_embeddings, use_aux=True)
+        else:
+            # print("no weak input")
+            # # # # debug: v3_wolblinput
+            hetero_uncs_, _, _, _ = \
+                        self.forward_decoder(img_feats, text_embeddings, text_embeddings.shape[0], y.shape[0], use_aux=True)
+        # # # # debug: v4_wolblinput1empty
+        # hetero_uncs_, _, _, _ = \
+        #             self.forward_decoder(img_feats, text_embeddings, text_embeddings.shape[0], y.shape[0], use_aux=True, one_no_noise_mask_embed=True)
+        if self.use_logvar_smooth:
+            # print("use logvar smooth")
+            hetero_uncs_ = rearrange(hetero_uncs_, 'b c h w -> (b c) 1 h w')
+            hetero_uncs_ = self.model.logvar_smoother(hetero_uncs_)
+            hetero_uncs_ = rearrange(hetero_uncs_, '(b c) 1 h w -> b c h w', b=y.shape[0])
+        hetero_uncs = F.relu(hetero_uncs_)
+        return hetero_uncs

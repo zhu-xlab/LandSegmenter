@@ -191,7 +191,7 @@ class_names = {
     'ghsl':{
         0: ['non-developed area', 'non-built-up area', 'pervious area'],
         1: ['residential area'],
-        2: ['non-residential area', 'commercial, industrial and transportation area'],
+        2: ['non-residential built-up area', 'non-residential developed area', 'commercial, industrial and transportation area'],
     },
 
     # # # # # # # # test sets # # # # # # # #

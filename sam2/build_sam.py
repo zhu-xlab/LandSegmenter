@@ -62,6 +62,11 @@ def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights, loa
                         sd[k_aux] = sd_[k]
                         # print(f'Copying decoder weights to auxiliary decoder weights: {k} -> {k_aux}')
             # assert not model.use_auxiliary_decoder, "Auxiliary decoder is not supported when load_decoder_weights is True"
+            # for num_multiple_outputs != 3
+            # for k in ['sam_mask_decoder.mask_tokens.weight', 
+            #           'sam_mask_decoder.iou_prediction_head.layers.2.weight',
+            #           'sam_mask_decoder.iou_prediction_head.layers.2.bias',]:
+            #     sd[k] = sd[k][:2]
             missing_keys, unexpected_keys = model.load_state_dict(sd, strict=False)
             # print(f'sd size: {len(sd)}, missing_keys: {len(missing_keys)}, unexpected_keys: {len(unexpected_keys)}')
             if missing_keys:
