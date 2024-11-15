@@ -28,4 +28,11 @@ wget $sam2_hiera_b_plus_url || { echo "Failed to download checkpoint from $sam2_
 echo "Downloading sam2_hiera_large.pt checkpoint..."
 wget $sam2_hiera_l_url || { echo "Failed to download checkpoint from $sam2_hiera_l_url"; exit 1; }
 
+
+# download dofa checkpoints
+wget https://huggingface.co/XShadow/DOFA/resolve/main/DOFA_ViT_base_e120.pth
+
+# download RemoteCLIP checkpoints
+wget https://huggingface.co/chendelong/RemoteCLIP/resolve/main/RemoteCLIP-ViT-B-32.pt
+
 echo "All checkpoints are downloaded successfully."
