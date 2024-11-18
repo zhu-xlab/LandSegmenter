@@ -44,10 +44,6 @@ def get_args_train_w_unc():
     parser.add_argument('--weak_weight_final', type=float, default=1.0, help='Final weight of weak loss')
     parser.add_argument('--weak_uncertainty_lambda', dest='weak_unc_lambda', type=float, default=1.0, help='Weight of weak uncertainty scale loss')
 
-    # logvar smoother settings
-    parser.add_argument('--use_logvar_smooth', action='store_true', default=False, help='Whether to use logvar smoother or not')
-    parser.add_argument('--fix_logvar_smooth', action='store_true', default=False, help='Whether to fix logvar smoother or not if using logvar smoother')
-
     # get common arguments
     parser = get_common_args(parser)
 
@@ -139,6 +135,9 @@ def get_common_args(parser):
     parser.add_argument('--use-separate-auxiliary-decoder-for-weak-labels', dest='use_sep_aux_de_weak', action='store_true', default=False, help='Whether to use separate auxiliary decoder for each weakly labeled dataset or not')
     parser.add_argument('--use-auxiliary-decoder', dest='use_aux_decoder', action='store_true', default=False, help='Whether to use auxiliary decoder (double decoders) or not')
     parser.add_argument('--share-short-connect-weights', dest='share_connect', action='store_true', default=False, help='Whether to share short connection weights or not when using auxiliary decoder')
+    # logvar smoother settings
+    parser.add_argument('--use_logvar_smooth', action='store_true', default=False, help='Whether to use logvar smoother or not')
+    parser.add_argument('--fix_logvar_smooth', action='store_true', default=False, help='Whether to fix logvar smoother or not if using logvar smoother')
     # parser.add_argument('--number_of_multiple_outputs', dest='n_mout', type=int, default=3, help='Number of multiple outputs')
     parser.add_argument('--use-noise-mask-loss', action='store_true', default=False, help='Whether to use the mask and eixstance mask on the branch where noise mask is used as input')
     parser.add_argument('--mute-adaptor', action='store_true', default=False, help='Whether to use adaptor or not')
@@ -158,6 +157,7 @@ def get_common_args(parser):
     parser.add_argument('--dice_loss_weight', dest='wdice', type=float, default=1.0, help='Weight of dice loss')
     parser.add_argument('--cross_entropy_loss_weight', dest='wce', type=float, default=1.0, help='Weight of cross entropy loss')
     parser.add_argument('--use_class_weights', action='store_true', default=False, help='Use class weights or not to weight binary losses.')
+    parser.add_argument('--class_weights_scale', type=float, default=10, help='Scale of class weights')
     parser.add_argument('--iou_no_object_weight', dest='wiou_no', type=float, default=0.5, help='Weight of iou loss for no object')
     parser.add_argument('--use_multiclass_loss', action='store_true', default=False, help='Use multiclass loss or not')
     parser.add_argument('--amp', action='store_false', default=True, help='Use mixed precision or not')
@@ -226,7 +226,7 @@ def set_log_files(args, w_unc=False):
         
     # job type
     args.job_type = f'{int(args.wfocal)}F_{int(args.wdice)}D_{int(args.wce)}C' 
-    if args.use_class_weights: args.job_type += '_clsw'
+    if args.use_class_weights: args.job_type += f'_clsw{int(args.class_weights_scale)}'
     # lr
     ea = int(np.ceil(np.log10(1/args.lr)))
     eb = int(np.round(args.lr*10**ea))
