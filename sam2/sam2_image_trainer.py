@@ -112,6 +112,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         # set up the losses: dice and focal
         self.use_multiclass_loss = args.use_multiclass_loss
         self.use_class_weights = args.use_class_weights
+        self.class_weights_scale = args.class_weights_scale
         self._set_loss_functions()
         # self.wunsure = args.winlbl  # incompletely labeled patches are regarded as unsure, assigning a smaller weight
         # optimizer
@@ -310,8 +311,15 @@ class SAM2ImageTrainer(pl.LightningModule):
     def on_train_epoch_start(self):
         # class weights
         if self.current_epoch==0 and self.use_class_weights:
-                self.class_weight_tensors = \
-                    {k:torch.tensor(class_weight_list[k], device=self.device) for k in class_weight_list}
+            self.class_weight_tensors = \
+                {k:torch.tensor(class_weight_list[k], device=self.device) for k in class_weight_list}
+            if self.class_weights_scale!=10:
+                assert self.class_weights_scale>1 and self.class_weights_scale<10, 'class_weight_scale should be larger than 1 and smaller than 10!'
+                for k in self.class_weight_tensors:
+                    self.class_weight_tensors[k] = (self.class_weight_tensors[k]*(self.class_weights_scale-1)-self.class_weights_scale+10)/9
+            if self.trainer.global_rank==0:
+                print(f'Class weights are used with scale={self.class_weights_scale}!')
+                print(f'Class weights: {self.class_weight_tensors}')
         # print(f'Starting epoch {self.current_epoch}')
         # return super().on_train_epoch_start()
     
