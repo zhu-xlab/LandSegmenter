@@ -12,5 +12,4 @@ docker run -it -h weakft --name $USER-weakft \
     -v /home/$USER:/home/$USER \
     -v /home/$USER/data:/data \
     -w /home/$USER/Codes/WeakFT \
-    $USER/weakft:v0.1.2 \
-    bash test.sh
+    $USER/weakft:v0.1.2

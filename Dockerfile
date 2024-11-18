@@ -16,7 +16,7 @@ RUN conda run -n $ENV_NAME pip install git+https://github.com/kornia/kornia
 RUN conda run -n $ENV_NAME pip install jupyter
 RUN conda run -n $ENV_NAME pip install debugpy
 
-EXPOSE 8888
+EXPOSE 7777
 
 # Set the environment to activate automatically
 ENV PATH /opt/conda/envs/$ENV_NAME/bin:$PATH
