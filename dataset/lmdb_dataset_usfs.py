@@ -5,7 +5,8 @@ import lmdb
 
 from dataset.data_properties_landsat import *
 
-LBL_KEYS = ['lc', 'lu']
+# LBL_KEYS = ['lc', 'lu']
+LBL_KEYS = ['lu']
 
 class USFSDataset(Dataset):
     def __init__(self, lmdb_file=None,
@@ -35,9 +36,12 @@ class USFSDataset(Dataset):
             else: 
                 assert N<=total_N, f"Requested number of samples {N} is larger than the total number of samples {total_N} in the dataset!"
                 self.length = N        
-                # print(f'Use a subset of {N} samples from the dataset.')            
-        
-        self.transform = SegAugTransformsTwoMasks(transform)
+                # print(f'Use a subset of {N} samples from the dataset.')          
+                  
+        if len(LBL_KEYS) == 1:
+            self.transform = SegAugTransforms(transform)
+        else:
+            self.transform = SegAugTransformsTwoMasks(transform)
         
 
     def __getitem__(self, index):
@@ -98,8 +102,11 @@ class USFSDataset(Dataset):
         waves = WAVELENS[bands[self.n_bands]]
 
         # transform for (img,lbl) pairs
-        img, lbl1, lbl2 = self.transform((img, lbls[0], lbls[1]))               
-        lbl = torch.stack([lbl1, lbl2], axis=0)
+        if len(lbls) == 1:
+            img, lbl = self.transform((img, lbls[0]))
+        else:
+            img, lbl1, lbl2 = self.transform((img, lbls[0], lbls[1]))               
+            lbl = torch.stack([lbl1, lbl2], axis=0)
 
         return {KEY_IMG: img, 
                 KEY_LBL: lbl.long(), 
