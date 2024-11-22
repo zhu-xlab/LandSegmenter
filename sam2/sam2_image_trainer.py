@@ -287,23 +287,44 @@ class SAM2ImageTrainer(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # main step
         # get data
-        x, y, waves, y_exist, n_classes, prompt_tokens, _, _ = self._get_data(batch)
+        x, ys, waves, y_exists, n_classes, prompt_tokens, if_weak_lbl, cls_name_keys = \
+            self._get_data(batch, return_single=False)
         
-        # prediction
-        masks, iou_predictions, precise_predictions, exist_predictions, _, _ = \
-            self.forward(x, prompt_tokens, waves)
+        # # # major forward process # # #            
+        # image embeddings
+        img_feats = self._get_image_embed(x, waves, False)
+
+        # make predictions and calculate losses
+        loss = torch.tensor(0., device=self.device)
+        for y, y_exist, n_class, prompt_token, name_key in zip(ys, y_exists, n_classes, prompt_tokens, cls_name_keys): 
+            text_embeddings = self._get_text_embeddings(prompt_token)
+
+            # prediction
+            masks, iou_predictions, precise_predictions, exist_predictions = \
+                self.forward_decoder(img_feats, text_embeddings, n_class, x.shape[0])
         
-        # prediction accuracies
-        precises, ious = self._get_accs(masks.detach(), y)
+            # prediction accuracies
+            if if_weak_lbl:
+                precises, ious =  None, None
+            else:
+                precises, ious = self._get_accs(masks.detach(), y)
         
-        # calculate losses 
-        loss = self._calculate_loss(n_classes, y, y_exist, ious, precises, 
-                        masks, exist_predictions, iou_predictions, precise_predictions,
-                        )
+            # calculate losses 
+            class_weights = self.class_weight_tensors[name_key] if self.use_class_weights else None
+            loss_ = self._calculate_loss(n_class, y, y_exist, ious, precises, 
+                                         masks, exist_predictions, iou_predictions, precise_predictions,
+                                         class_weights=class_weights, log=False,
+                                         )
+
+            # training image examples  
+            if batch_idx<2 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
+                self._log_imgs(f'tr_{name_key}', x[0], masks[0], y[0])
+            
+            # losses.append(loss)
+            loss = loss + loss_
         
-        # training image examples  
-        if batch_idx==0 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
-            self._log_imgs('tr', x[0], masks[0], y[0])
+        # log loss
+        self.log('tr_loss', loss, on_epoch=True, on_step=False, sync_dist=True) #, batch_size=x.shape[0])
         
         return loss
     
