@@ -58,6 +58,16 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
         # # # major forward process # # #            
         # image embeddings
         img_feats = self._get_image_embed(x, waves, True)
+        # for uncertainty branch
+        if self.weak_detach:
+            img_feats_unc = {}
+            for k, v in img_feats.items():
+                if isinstance(v, torch.Tensor):
+                    img_feats_unc[k] = v.detach()
+                else:
+                    img_feats_unc[k] = [v_i.detach() for v_i in v]
+        else:
+            img_feats_unc = img_feats
 
         # make predictions and calculate losses
         loss = torch.tensor(0., device=self.device)
@@ -80,7 +90,7 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
             if if_weak_lbl:
                 precises, ious =  None, None
                 # uncertainty predictions
-                hetero_uncs = self._get_hetero_uncertainty(y, img_feats, text_embeddings)
+                hetero_uncs = self._get_hetero_uncertainty(y, img_feats_unc, text_embeddings)
             else:
                 precises, ious = self._get_accs(masks.detach(), y)
         
@@ -108,7 +118,7 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
             elif not if_weak_lbl:
                 # for exact labels
                 y_pred = (masks.detach()>0).to(y.dtype)
-                hetero_unc_gt = self._get_hetero_uncertainty(y_pred, img_feats, text_embeddings)
+                hetero_unc_gt = self._get_hetero_uncertainty(y_pred, img_feats_unc, text_embeddings)
                 unc_loss = self.unc_lambda*self._get_uncertainty_loss_for_predictions(y_pred, y, hetero_unc_gt)
                 if log_insides_func:
                     self.log('tr_loss_gt_unc', unc_loss, on_epoch=True, on_step=False, sync_dist=True)

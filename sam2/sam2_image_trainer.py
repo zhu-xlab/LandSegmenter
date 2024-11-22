@@ -91,6 +91,9 @@ class SAM2ImageTrainer(pl.LightningModule):
                                 load_aux_decoder_weights=args.load_aux_de,
                                 dofa_unfix_weights=args.dofa_unfix_weights, 
                                 hydra_overrides_extra=hydra_overrides_extra)
+        
+        # for uncertainty estimate from the auxiliary branch
+        self.weak_detach = args.weak_detach
 
         # Spatial dim for backbone feature maps
         self._bb_feat_sizes = [

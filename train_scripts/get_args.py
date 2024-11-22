@@ -43,6 +43,7 @@ def get_args_train_w_unc():
     parser.add_argument('--weak_weight_rampup_start', type=int, default=0, help='Number of epochs for weak weight rampup')
     parser.add_argument('--weak_weight_final', type=float, default=1.0, help='Final weight of weak loss')
     parser.add_argument('--weak_uncertainty_lambda', dest='weak_unc_lambda', type=float, default=1.0, help='Weight of weak uncertainty scale loss')
+    parser.add_argument('--weak_branch_with_detach_encoder', dest='weak_detach', action='store_true', default=False, help='Whether to detach encoder for weak branch or not')
 
     # get common arguments
     parser = get_common_args(parser)
@@ -251,6 +252,7 @@ def set_log_files(args, w_unc=False):
     if w_unc:
         args.gname += f'_unc{args.weak_weight_final}'
         args.job_type += f'_rmup{args.weak_weight_rampup_start}_{args.weak_weight_rampup_end}_l{args.weak_unc_lambda}'
+        if args.weak_detach: args.job_type += '_denc'
         args.gname += '_wowl' if args.no_weak_input else ''
         if args.use_logvar_smooth:
             args.job_type += '_fsmt' if args.fix_logvar_smooth else '_asmt'
