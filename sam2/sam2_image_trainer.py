@@ -45,7 +45,7 @@ MASK_CODE = 255
 INPUT_SIZE = 1024
 TEXT_PREFIX = 'A photo of '
 
-MULTI_MASK_KEYS = {'usfs': ['usfs-lc', 'usfs-lu'],
+MULTI_MASK_KEYS = {# 'usfs': ['usfs-lc', 'usfs-lu'],
                    'nlcd': ['nlcd-lc', 'nlcd-imp']}
 
 class SAM2ImageTrainer(pl.LightningModule):
