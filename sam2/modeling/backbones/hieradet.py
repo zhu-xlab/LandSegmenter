@@ -321,7 +321,8 @@ class Hiera(nn.Module):
     def forward_without_adaptor(self, x: torch.Tensor) -> List[torch.Tensor]:
         with torch.no_grad():
             x = x[:, :3] # sam2 only uses RGB channels
-            x = F.interpolate(x, size=(self.sam2_img_size, self.sam2_img_size), mode='bilinear', align_corners=False).contiguous()
+            if x.shape[-2:] != (self.sam2_img_size, self.sam2_img_size):
+                x = F.interpolate(x, size=(self.sam2_img_size, self.sam2_img_size), mode='bilinear', align_corners=False).contiguous()
             x = self.patch_embed(x)
             # x: (B, H, W, C)
 
@@ -342,8 +343,9 @@ class Hiera(nn.Module):
     def forward_with_adaptor(self, x: torch.Tensor, wave_list: List[float] = None) -> List[torch.Tensor]:
         inp = x
         x = x[:, :3] # sam2 only uses RGB channels
-        x = F.interpolate(x[:, :3], size=(self.sam2_img_size, self.sam2_img_size), mode='bilinear', align_corners=False).contiguous()
-
+        if x.shape[-2:] != (self.sam2_img_size, self.sam2_img_size):
+            x = F.interpolate(x[:, :3], size=(self.sam2_img_size, self.sam2_img_size), mode='bilinear', align_corners=False).contiguous()
+        
         # original sam2 part
         with torch.no_grad():
             x = self.patch_embed(x)   # x: (B, H, W, C)

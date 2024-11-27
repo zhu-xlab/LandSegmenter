@@ -9,7 +9,7 @@ from dataset.data_properties_sentinel import SegAugTransforms
 
 BANDS = {3: [2,1,0], 
          4: [2,1,0,3]}  # [2,1,3,0] corresponds to [red, green, blue, nir]
-WAVES = np.array([0.480, 0.560, 0.655, 0.865])  # order:red, green, blue, nir
+WAVES = np.array([0.480, 0.560, 0.655, 0.865])  # order:blue, green, red, nir
 MEANS = [1042.59240722656, 915.618408203125, 671.260559082031, 2605.20922851562]  # order:red, green, blue, nir
 STDS  = [957.958435058593, 715.548767089843, 596.943908691406, 1059.90319824218]
 

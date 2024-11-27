@@ -2,6 +2,7 @@ import os
 
 dataset_names = ['dw', 'dynamicearthnet', 'openearthmap']
 weak_lmdb_dir = '/p/scratch/hai_ws4eo/liu_ch/data/WeakFT/weak_lmdbs'
+test_data_dir = '/data/weakFT/test'
 
 datasets_settings_train = {
     'dw': {
@@ -56,23 +57,49 @@ datasets_settings_train = {
 
 datasets_settings_test = {
     'dw': {
-        'data_path': '/p/project1/hai_dm4eo/liu_ch/data/SSL4EO-S2/downstream_lmdb_small_remove/dw_test_lmdb',
+        'data_path': os.path.join(test_data_dir, 'dw_test_lmdb'),
         'mode': 's2',
         'n_channels': 13,
+        'input_size': 256,
     },
 
     'osm': {
-        'data_path': '/p/scratch/hai_ws4eo/liu_ch/data/WeakFT/test_data/dwosm/osm_test_lmdb',
+        'data_path': os.path.join(test_data_dir, 'osm_test_lmdb'),
         'mode': 's2',
         'n_channels': 13,
+        'input_size': 256,
     },
 
     'openearthmap': {
-        'data_path': '/p/project1/hai_ws4eo/liu_ch/data/WeakFT/exact/openearthmap_val.lmdb',
+        'data_path': os.path.join(test_data_dir, 'openearthmap_val.lmdb'),
+        'input_size': 256,
     },
 
     'multisenge': {
-        'data_path': '/p/scratch/hai_ws4eo/liu_ch/data/WeakFT/test_data/multisenge/multisenge.lmdb',
+        'data_path': os.path.join(test_data_dir, 'multisenge_test.lmdb'),
+        'input_size': 256,
+    },
+
+    'vaihingen': {
+        'data_path': os.path.join(test_data_dir, 'vaihingen_p256_val.lmdb'),
+        'input_size': 256,
+    },
+
+    'potsdam': {
+        'data_path': os.path.join(test_data_dir, 'potsdam_p512_val.lmdb'),
+        'n_channels': 3,
+        'input_size': 512,
+    },
+
+    'nyc': {
+        'data_path': os.path.join(test_data_dir, 'NYC_p288_test.lmdb'),
+        'n_channels': 3,
+        'input_size': 256,
+    },
+
+    'loveda': {
+        'data_path': os.path.join(test_data_dir, 'loveda_p128_val.lmdb'),
+        'input_size': 512,
     },
 }
 
@@ -196,21 +223,37 @@ class_names = {
 
     # # # # # # # # test sets # # # # # # # #
     'multisenge': {
-        0: ['built-up high-intensity imperious area'],  # Dense built-up areas
-        1: ['built-up low-intensity imperious area'],   # sparely built-up areas
-        2: ['industrial, commercial and transportation area'],              # Specialized built-Up Areas
+        0: ['built-up high-intensity impervious area'],  # Dense built-up areas
+        1: ['built-up low-intensity impervious area'],   # sparely built-up areas
+        2: ['industrial and commercial area'],              # Specialized built-Up Areas
         3: ['artificial, non-argricultural vegetation'],     # Specialized but vegetative areas     
-        4: ['transportation area'],       # Large scale networks
-        5: ['arable lands'],
-        6: ['vineyards'],
-        7: ['orchards'],
-        8: ['grasslands'],
+        4: ['transportation'],       # Large scale networks
+        5: ['arable land'],
+        6: ['vineyard'],
+        7: ['orchard'],
+        8: ['grassland'],
         9: ['shrub and scrub'],
         10:['forest'],
-        11:['bare land'],
+        11:['bare land including mine site'],
         12:['wetland'],
         13:['water'],
     },
+    # 'multisenge': {
+    #     0: ['built-up high-intensity imperious area'],  # Dense built-up areas
+    #     1: ['built-up low-intensity imperious area'],   # sparely built-up areas
+    #     2: ['industrial, commercial and transportation area'],              # Specialized built-Up Areas
+    #     3: ['artificial, non-argricultural vegetation'],     # Specialized but vegetative areas     
+    #     4: ['transportation area'],       # Large scale networks
+    #     5: ['arable land'],
+    #     6: ['vineyard'],
+    #     7: ['orchard'],
+    #     8: ['grassland'],
+    #     9: ['shrub and scrub'],
+    #     10:['forest'],
+    #     11:['bare land'],
+    #     12:['wetland'],
+    #     13:['water'],
+    # },
 
     # # # # # these two correspond to the visualization order not the order saved in lmdb # # # # #
     # 'osm':{
@@ -256,7 +299,7 @@ class_names = {
         6: ['built-up area', 'Urban area', 'Developed land', 'Residential and commercial zone', 'Infrastructure', 'Built-up land'],
         7: ['bare land', 'Barren terrain', 'Open soil', 'Unvegetated land', 'Exposed earth'],
         8: ['ice and snow', 'Glacial area', 'Snow cover', 'Ice field', 'Frozen surface'],
-        9: ['Cloud', 'Cloud cover', 'Cloudy sky', 'Cloud layer', 'Cloud formation'],
+        # 9: ['Cloud', 'Cloud cover', 'Cloudy sky', 'Cloud layer', 'Cloud formation'],
     },
 
     'osm':{
@@ -275,6 +318,44 @@ class_names = {
         12:['coastal wetland'],
     },
 
+    'vaihingen':{
+        0: ['others except for grass, shrub, scrub, impervious area, car, building and tree'],
+        1: ['grass, shrub and scrub'],  # low vegetation
+        2: ['impervious area'],  # impervious surfaces
+        3: ['car'],  # car
+        4: ['building'],  # roof
+        5: ['tree'],  # tree
+    },
+
+    'potsdam':{
+        0: ['others except for grass, shrub, scrub, impervious area, car, building and tree'],
+        1: ['grass, shrub and scrub'],  # low vegetation
+        2: ['impervious area'],  # impervious surfaces
+        3: ['car'],  # car
+        4: ['building'],  # roof
+        5: ['tree'],  # tree
+    },
+
+    'nyc':{
+        0: ['tree'],
+        1: ['grass, shrub and scrub'],
+        2: ['bare land'],
+        3: ['water'],
+        4: ['building'],
+        5: ['road except for railway'],
+        6: ['impervious area except for road and building'],
+        7: ['railway'],
+    },
+
+    'loveda':{
+        0: ['others except for building, road, water, barren land, tree and agricultural land'],
+        1: ['building'],  # building
+        2: ['road'],  # road
+        3: ['water'],  # water
+        4: ['barren land'],  # bare land
+        5: ['tree'],  # tree
+        6: ['agricultural land'],  # agricultural land
+    },
 }
 
 
