@@ -4,7 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-
+import h5py
 import wandb
 import random
 
@@ -125,9 +125,28 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.schdt = args.schdt
         self.schdv = args.schdv
         self.max_epochs = args.epochs
-        self.n_train_batches = int(args.n_batch_tr/args.ntasks)
+        if args.test_only:
+            self.n_train_batches = 1
+        else:
+            self.n_train_batches = int(args.n_batch_tr/args.ntasks)
         # display interval
         self.display_inv = args.display_inv
+
+        if args.test_only:
+            self.test_save_path = args.test_save_path
+            assert self.test_save_path.endswith('.h5') or self.test_save_path.endswith('.npy'), 'Test save path must be a .h5 or .npy file!'
+            # for gt
+            self.ys = []
+            # for pred
+            self.y_exist = []
+            self.ts_masks = []
+            self.ts_iou, self.ts_iou_pred = [], []
+            self.ts_acc, self.ts_acc_pred = [], []
+            self.ts_exist = []
+
+            # test mode
+            self.save_acc_only = True if self.test_save_path.endswith('.npy') else False
+            
 
     # ------ forward propogation ------ #
     def forward(self, x, prompt, waves=None, use_aux=False):  # text prompt: here is the tokenized tensor
@@ -353,7 +372,88 @@ class SAM2ImageTrainer(pl.LightningModule):
 
 
     def test_step(self, batch, batch_idx):
-        self._do_validation(batch, batch_idx, prefix='test')
+        # get data
+        x, y, waves, y_exist, n_classes, prompt_tokens, _, _ = self._get_data(batch)
+        # bs = x.shape[0]
+
+        # prediction
+        with torch.no_grad():
+            masks, iou_predictions, precise_predictions, existance_predictions, _, _ = \
+                self.forward(x, prompt_tokens, waves, use_aux=False)
+        
+        if x.shape[-2:] != masks.shape[-2:]:
+            masks = F.interpolate(masks, size=x.shape[-2:], mode='bilinear', align_corners=False)
+
+        # accuracies of mask predictions
+        accs, ious = self._get_accs(masks.detach(), y)
+        # accs_aux, ious_aux = self._get_accs(masks_aux.detach(), y)
+        
+        # save results
+        self.ys.append(y.cpu().numpy().astype(np.uint8))
+        self.y_exist.append(y_exist.cpu().numpy().astype(np.uint8))
+        self.ts_masks.append(masks.detach().cpu().numpy()) # .argmax(axis=1).astype(np.uint8))
+        # self.ts_masks_aux.append(masks_aux.detach().cpu().numpy()) #.argmax(axis=1).astype(np.uint8))
+        self.ts_iou.append(ious.cpu().numpy())
+        # self.ts_iou_aux.append(ious_aux.cpu().numpy())
+        self.ts_iou_pred.append(iou_predictions.detach().cpu().numpy())
+        # self.ts_iou_pred_aux.append(iou_predictions_aux.detach().cpu().numpy())
+        self.ts_acc.append(accs.cpu().numpy())
+        # self.ts_acc_aux.append(accs_aux.cpu().numpy())
+        self.ts_acc_pred.append(precise_predictions.detach().cpu().numpy())
+        # self.ts_acc_pred_aux.append(precise_predictions_aux.detach().cpu().numpy())
+        self.ts_exist.append((existance_predictions.detach().cpu().numpy()>0).astype(np.uint8))
+
+        del masks 
+        torch.cuda.empty_cache()
+
+
+    def on_test_epoch_end(self):
+        # calculate iou from all samples
+        ys = np.concatenate(self.ys, axis=0)
+        ys = np.where(ys!=MASK_CODE, ys+1, 0)
+        ts_masks = np.concatenate(self.ts_masks, axis=0)
+        n_classes = ts_masks.shape[1]
+        ts_masks = np.argmax(ts_masks, axis=1)+1
+        ts_masks[ys==0] = 0
+        ts_iou_all, ts_oa = self._calculate_acc_from_all(ts_masks, ys, n_classes)
+        accs = np.array(ts_iou_all+[ts_oa])
+
+        if self.save_acc_only:
+            # patch-wise accuracies
+            ts_iou = np.concatenate(self.ts_iou, axis=0)
+            ts_acc = np.concatenate(self.ts_acc, axis=0)
+            ts_iou_pwise = np.concatenate([ts_iou, 
+                                           np.mean(ts_iou, axis=1, keepdims=True),
+                                           np.mean(ts_acc, axis=1, keepdims=True)], 
+                                           axis=1)
+            ts_iou_pwise = np.concatenate([ts_iou_pwise, np.mean(ts_iou_pwise, axis=0, keepdims=True)], axis=0)
+            ts_ious = np.concatenate([np.reshape(accs, (1,-1)), ts_iou_pwise], axis=0)
+            np.save(self.test_save_path, ts_ious)
+        else:
+            with h5py.File(self.test_save_path, 'w') as h:
+                # accuracies from all the data
+                h.create_dataset('ts_iou_all', data=accs)
+                # for k, v in zip(['y_exist', 'ts_masks', 'ts_masks_aux', 'ts_iou', 'ts_iou_aux', 'ts_iou_pred', 'ts_iou_pred_aux', 'ts_acc', 'ts_acc_aux', 'ts_acc_pred', 'ts_acc_pred_aux', 'ts_exist', 'ts_exist_aux', 'ts_iou_pred_ano', 'ts_iou_pred_aux_ano', 'ts_acc_pred_ano', 'ts_acc_pred_aux_ano'], 
+                #                 [self.y_exist, self.ts_masks, self.ts_masks_aux, self.ts_iou, self.ts_iou_aux, self.ts_iou_pred, self.ts_iou_pred_aux, self.ts_acc, self.ts_acc_aux, self.ts_acc_pred, self.ts_acc_pred_aux, self.ts_exist, self.ts_exist_aux, self.ts_iou_pred_ano, self.ts_iou_pred_aux_ano, self.ts_acc_pred_ano, self.ts_acc_pred_aux_ano]):
+                for k, v in zip(['y_exist', 'ts_masks', 'ts_iou', 'ts_iou_pred', 'ts_acc', 'ts_acc_pred', 'ts_exist'], 
+                                [self.y_exist, self.ts_masks, self.ts_iou, self.ts_iou_pred, self.ts_acc, self.ts_acc_pred, self.ts_exist]):
+                    h.create_dataset(k, data=np.concatenate(v, axis=0))
+                    v.clear()
+        
+
+    def _calculate_acc_from_all(self, pred, gt, n_classes):
+        ious = []
+        for i in range(1,n_classes+1):
+            pred_ = (pred == i).astype(float)   
+            gt_ = (gt == i).astype(float)
+            intersection = np.sum(pred_ * gt_)
+            union = np.sum(pred_) + np.sum(gt_) - intersection
+            iou = intersection / union
+            ious.append(iou)
+        ious.append(np.mean(ious))
+        tmp = pred==gt
+        oa = np.sum(tmp[gt>0])/np.sum(gt>0)
+        return ious, oa
 
 
     # ------ Model utilities ------ #

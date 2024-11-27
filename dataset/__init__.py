@@ -9,9 +9,14 @@ from dataset.lmdb_dataset_sbtn import SBTNDataset
 from dataset.lmdb_dataset_multisenge import MultiSenGeDataset
 from dataset.lmdb_dataset_ghsl import GHSLDataset
 
+from dataset.lmdb_dataset_nyc import NYCDataset
+from dataset.lmdb_dataset_loveda import LoveDADataset
+from dataset.lmdb_dataset_vaihingen import VaihingenDataset
+from dataset.lmdb_dataset_potsdam import PotsdamDataset
 
 __all__ = ['SegAugTransforms', 
            'MultiSenGeDataset',
            'DWOSMDataset', 'DyEarthDataset', 'OpenEarthMapDataset',
            'IranDataset', 'WorldCoverDataset', 'GHSLDataset',
-           'USFSDataset', 'NLCDDataset', 'SBTNDataset']
+           'USFSDataset', 'NLCDDataset', 'SBTNDataset',
+           'NYCDataset', 'LoveDADataset', 'VaihingenDataset', 'PotsdamDataset']

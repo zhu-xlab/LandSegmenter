@@ -220,6 +220,7 @@ class PromptGenerator(nn.Module):
         self.embedding_tune = embedding_tune
         self.spectralfeat_tune = spectralfeat_tune
         self.adaptor = adaptor
+        self.image_size = img_size
 
         if self.input_type == 'gaussian':
             self.gaussian_filter = GaussianFilter()
@@ -383,6 +384,8 @@ class PromptGenerator(nn.Module):
             x_mean = x.mean(dim=1, keepdim=True)
             x_min = x.min(dim=1, keepdim=True)[0]
             x = torch.cat([x[:,:3], x_max, x_mean, x_min], dim=1)
+        if x.shape[-1] != self.image_size:
+            x = F.interpolate(x, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)
 
         # batch size
         B = x.shape[0]
