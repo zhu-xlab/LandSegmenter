@@ -315,4 +315,4 @@ dependencies:
       - widgetsnbextension==4.0.13
       - wrapt==1.16.0
       - yarl==1.9.11
-prefix: /p/project/hai_dm4eo/liu_ch/myenvs/miniconda3/envs/sam2
+prefix: /opt/conda/envs/sam2
