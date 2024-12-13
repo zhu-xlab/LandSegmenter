@@ -15,6 +15,7 @@ import pytorch_lightning as pl
 from train_scripts.get_args import get_args_test_framework as get_args
 from sam2.sam2_image_trainer import SAM2ImageTrainer
 from sam2.sam2_image_w_auxDe_trainer import SAM2ImageTrainerAux
+from sam2.sam2_image_w_sepAuxDe4Weak_trainer import SAM2ImageTrainerSepAuxDe4Weak
 
 # dataset
 from dataset.datasets_settings import datasets_settings_test
@@ -97,6 +98,11 @@ def main():
 
         ###### 3 - define the model ######
         torch.set_float32_matmul_precision('high')
+        if args.use_sep_aux_de_weak:
+            args.dataset_name = ['dynamicearthnet', 'openearthmap', 'sbtn', 'worldcover', 'iran', 'ghsl', 'nlcd', 'usfs']
+        # build model
+        if args.use_sep_aux_de_weak:
+            model = SAM2ImageTrainerSepAuxDe4Weak(args)
         if args.use_aux_decoder:
             model = SAM2ImageTrainerAux(args)
         else:
@@ -104,7 +110,7 @@ def main():
         
         
         ###### 4 - train the model ######
-        print('\nStart testing...')
+        print('Start testing...')
         trainer = pl.Trainer(accelerator=args.accelerator,
                              devices=args.devices,
                              strategy=args.strategy,

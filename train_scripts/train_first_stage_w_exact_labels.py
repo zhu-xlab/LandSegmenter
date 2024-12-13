@@ -143,7 +143,7 @@ def main():
     callbacks = [ModelCheckpoint(dirpath = args.checkpoints_dir, every_n_epochs = args.save_inv, 
                                 #  save_weights_only=True, filename='model_{epoch:02d}_{val_loss:.2f}',
                                  save_top_k=-1,  # Save all models
-                                #  save_last=True 
+                                 save_last=True 
                                  )]
     if args.schdt!='none': callbacks += [LearningRateMonitor(logging_interval='epoch')]
     trainer = pl.Trainer(accelerator=args.accelerator,

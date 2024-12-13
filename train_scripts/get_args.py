@@ -45,6 +45,11 @@ def get_args_train_w_unc():
     parser.add_argument('--weak_uncertainty_lambda', dest='weak_unc_lambda', type=float, default=1.0, help='Weight of weak uncertainty scale loss')
     parser.add_argument('--weak_branch_with_detach_encoder', dest='weak_detach', action='store_true', default=False, help='Whether to detach encoder for weak branch or not')
 
+    # rescale settings
+    parser.add_argument('--rescale_weights', action='store_true', default=False, help='Whether to rescale weights or not')
+    parser.add_argument('--rescale_weights_positive_mean', dest='weight_pos_mean', type=float, default=0.75, help='Positive mean for rescaling weights')
+    parser.add_argument('--rescale_weights_negative_mean', dest='weight_neg_mean', type=float, default=0.25, help='Negative mean for rescaling weights')
+
     # get common arguments
     parser = get_common_args(parser)
 
@@ -98,44 +103,26 @@ def get_args_test_framework():
     return args
 
 
-def get_args_dw():
-    parser = argparse.ArgumentParser(description='Fine-tune SAM2 with DW data')
-    # dataset name
-    parser.add_argument('--dataset_name', type=str, choices=['DWGT', 'SSL4EO'], help='Name of the dataset')
-    
+def get_args_fine_tune():
+    parser = argparse.ArgumentParser(description='Fine-tuning')
     # data settings
-    parser.add_argument('--test_path', type=str, default='E:/Datasets/DFC2020/lmdb/DFC2020_s12_test.lmdb')
-    parser.add_argument('--label_type', dest='lbl_t', type=str, default='dw', choices=['dw', 'osm'], help='Type of label')
-    
-    # data settings - DWGT
-    parser.add_argument('--train_path', type=str, default='E:/Datasets/DFC2020/lmdb/DFC2020_s12_validation.lmdb')
-    
-    # data settings - DWNS
-    parser.add_argument('--data_path', type=str, default='E:/Datasets/DFC2020/lmdb/DFC2020_s12_validation.lmdb')
-    parser.add_argument('--data_name_s1', dest='dns1', type=str, default=None)
-    parser.add_argument('--data_name_s2', dest='dns2', type=str, default=None)
-    parser.add_argument('--data_name_weak_label', dest='dnwl', type=str, default=None)
-    
-    # others 
-    parser.add_argument('--input_type', dest='it', type=str, default='s2', choices=['s1', 's2', 's12'], help='Type of input data')
-    parser.add_argument('--n_channels', type=int, default=3, help='Number of input channels.') 
-    parser.add_argument('--patch_size', type=int, default=256, help='Random cropped Patch size before resizing to 1024.')
-    # parser.add_argument('--n-prompts', type=int, default=[9], nargs='*', help='Number of prompts')
-    parser.add_argument('--validation', dest='val', type=float, default=0., help='Percent of the data that is used as validation (0-1.0)')
-    parser.add_argument('--n_train', dest='ntr', type=int, default=-1, 
-                        help='Number of training samples used (1-total number of trainig samples, default=-1 to use all of samples for training)')
-    
+    parser.add_argument('--dataset_name', type=str, default='dw', help='Names of the datasets used for fine-tuning')
+    parser.add_argument('--fine_tune_accuracy_branch', dest='fine_tune_acc', action='store_true', default=False, help='Whether to fine-tune accuracy branch or not')
+    parser.add_argument('--fine_tune_checkpoint_path', dest='ft_wpath', type=str, default=None, help='Path of model weights to fine tune.')
+    # for model weight optimization
+    parser.add_argument('--freeze_backbones_only', action='store_true', default=False, help='To freeze two backbones only or the whole encoder (by default: to freeze the whole encoder).')
+    # for binary loss settings
+    parser.add_argument('--use_binary_loss', action='store_true', default=False, help='Whether to use binary loss or not')
+    parser.add_argument('--use_class_multiplier', action='store_true', default=False, help='Whether to use class multiplier or not')
+
     # get common arguments
     parser = get_common_args(parser)
-    
+
     # initialize arguments
     args = parser.parse_args()
-    
+
     # computing environment parameters
     args = get_device_info(args)
-    
-    # set saving dir
-    args = set_log_files(args)
     
     return args
 
@@ -275,6 +262,8 @@ def set_log_files(args, w_unc=False):
         args.job_type += f'_rmup{args.weak_weight_rampup_start}_{args.weak_weight_rampup_end}_l{args.weak_unc_lambda}'
         if args.weak_detach: args.job_type += '_denc'
         args.gname += '_wowl' if args.no_weak_input else ''
+        if args.rescale_weights:
+            args.gname += f'_rw_p{args.weight_pos_mean}_n{args.weight_neg_mean}'
         if args.use_logvar_smooth:
             args.job_type += '_fsmt' if args.fix_logvar_smooth else '_asmt'
     # # for debugging tag
@@ -319,12 +308,13 @@ def get_device_info(args):
         
     if args.slurm:
         args.nodes = int(os.environ["SLURM_NNODES"])
-        args.devices = int(os.environ["SLURM_TASKS_PER_NODE"][0]) #.split('(')[0])
+        args.devices = int(os.environ["SLURM_GPUS_ON_NODE"]) # [0]) #.split('(')[0])
         args.current_device = int(os.environ["SLURM_LOCALID"])
         print(f'Slurm found with {args.nodes} nodes, {args.devices} devices per node (current:{args.current_device}).')
-        args.ntasks = int(os.environ["SLURM_NTASKS"])
+        args.ntasks = args.nodes * args.devices
+        # args.ntasks = int(os.environ["SLURM_NTASKS"])
         # print(f'Number of tasks: {args.ntasks}')
-        assert args.ntasks == args.nodes * args.devices, 'Number of tasks is not equal to the number of devices!'
+        # assert args.ntasks == args.nodes * args.devices, 'Number of tasks is not equal to the number of devices!'
     else:    
         args.nodes = 1
         # gpu

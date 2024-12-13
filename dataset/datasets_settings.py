@@ -1,22 +1,19 @@
 import os
 
 dataset_names = ['dw', 'dynamicearthnet', 'openearthmap']
-weak_lmdb_dir = '/p/scratch/hai_ws4eo/liu_ch/data/WeakFT/weak_lmdbs'
-test_data_dir = '/data/weakFT/test'
+data_dir = 'data/weakFT'
+weak_lmdb_dir = os.path.join(data_dir, 'weak')
+exact_lmdb_dir = os.path.join(data_dir, 'exact')
+test_lmdb_dir = os.path.join(data_dir, 'test')
+ft_lmdb_dir = os.path.join(data_dir, 'ft_train')
 
 datasets_settings_train = {
-    'dw': {
-        'data_path': '/p/project1/hai_dm4eo/liu_ch/data/SSL4EO-S2/downstream_lmdb_small_remove/dw_train_lmdb',
-        'mode': 's2',
-        'n_channels': 13,
-        },
-
     'dynamicearthnet': {
-        'data_path': '/p/project1/hai_ws4eo/liu_ch/data/WeakFT/exact/dynamicearthnet_seasonal.lmdb',
+        'data_path': os.path.join(exact_lmdb_dir, 'dynamicearthnet_seasonal.lmdb'),
         },
     
     'openearthmap': {
-        'data_path': '/p/project1/hai_ws4eo/liu_ch/data/WeakFT/exact/openearthmap_train.lmdb',
+        'data_path': os.path.join(exact_lmdb_dir, 'openearthmap_train.lmdb'),
         },
     
     'iran': {
@@ -57,48 +54,57 @@ datasets_settings_train = {
 
 datasets_settings_test = {
     'dw': {
-        'data_path': os.path.join(test_data_dir, 'dw_test_lmdb'),
+        'data_path': os.path.join(test_lmdb_dir, 'dw_test_lmdb'),
+        'data_path_ft': os.path.join(ft_lmdb_dir, 'dw_train_lmdb'),
         'mode': 's2',
         'n_channels': 13,
         'input_size': 256,
     },
 
     'osm': {
-        'data_path': os.path.join(test_data_dir, 'osm_test_lmdb'),
+        'data_path': os.path.join(test_lmdb_dir, 'osm_test_lmdb'),
+        'data_path_ft': os.path.join(ft_lmdb_dir, 'osm_train_lmdb'),
         'mode': 's2',
         'n_channels': 13,
         'input_size': 256,
     },
 
     'openearthmap': {
-        'data_path': os.path.join(test_data_dir, 'openearthmap_val.lmdb'),
+        'data_path': os.path.join(test_lmdb_dir, 'openearthmap_val.lmdb'),
         'input_size': 256,
     },
 
     'multisenge': {
-        'data_path': os.path.join(test_data_dir, 'multisenge_test.lmdb'),
+        'data_path': os.path.join(test_lmdb_dir, 'multisenge_test.lmdb'),
+        'data_path_ft': os.path.join(ft_lmdb_dir, 'multisenge_train.lmdb'),
+        'n_channels': 10,
         'input_size': 256,
     },
 
     'vaihingen': {
-        'data_path': os.path.join(test_data_dir, 'vaihingen_p256_val.lmdb'),
+        'data_path': os.path.join(test_lmdb_dir, 'vaihingen_p256_val.lmdb'),
+        'data_path_ft': os.path.join(ft_lmdb_dir, 'vaihingen_p256_train.lmdb'),
         'input_size': 256,
     },
 
     'potsdam': {
-        'data_path': os.path.join(test_data_dir, 'potsdam_p512_val.lmdb'),
+        'data_path': os.path.join(test_lmdb_dir, 'potsdam_p512_val.lmdb'),
+        'data_path_ft': os.path.join(ft_lmdb_dir, 'potsdam_p512_train.lmdb'),
         'n_channels': 3,
         'input_size': 512,
     },
 
     'nyc': {
-        'data_path': os.path.join(test_data_dir, 'NYC_p288_test.lmdb'),
+        'data_path': os.path.join(test_lmdb_dir, 'NYC_p288_test.lmdb'),
+        'data_path_ft': os.path.join(ft_lmdb_dir, 'NYC_p288_train.lmdb'),
         'n_channels': 3,
         'input_size': 256,
     },
 
     'loveda': {
-        'data_path': os.path.join(test_data_dir, 'loveda_p128_val.lmdb'),
+        'data_path': os.path.join(test_lmdb_dir, 'loveda_p512_val.lmdb'),
+        'data_path_ft': os.path.join(ft_lmdb_dir, 'loveda_p512_train.lmdb'),
+        'n_channels': 3,
         'input_size': 512,
     },
 }
@@ -153,6 +159,7 @@ class_names = {
         10:['moss and lichen'],
     },
 
+    ############################### FOR USFS LC ################################
     # 'usfs-lc':{
     #     0: ['tree', 'forest', 'wood', 'broadleaf forest and coniferous forest', 'deciduous forest and evergreen forest', 'broadleaf tree and coniferous tree', 'deciduous tree and evergreen tree'],
     #     1: ['mixed shrub and tree area', 'mixed scrub and tree area'],
@@ -329,9 +336,9 @@ class_names = {
     },
 
     'potsdam':{
-        0: ['others except for grass, shrub, scrub, impervious area, car, building and tree'],
+        0: ['barren land'], # ['others except for grass, shrub, scrub, impervious area, car, building and tree'],
         1: ['grass, shrub and scrub'],  # low vegetation
-        2: ['impervious area'],  # impervious surfaces
+        2: ['impervious area including road'], # ['impervious area'],  # impervious surfaces
         3: ['car'],  # car
         4: ['building'],  # roof
         5: ['tree'],  # tree

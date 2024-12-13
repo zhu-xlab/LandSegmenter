@@ -23,6 +23,7 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
         self.weak_weight_final = args.weak_weight_final
         self.unc_lambda = args.weak_unc_lambda
         self.no_weak_input = args.no_weak_input
+        self.weak_detach = args.weak_detach
         # logvar smooth layer
         # v1: no_grads=True, fixsmt, but debug-tag=adaptsmt
         # v2: no_grads=False, realadaptsmt
@@ -42,6 +43,10 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
             self.ts_exist, self.ts_exist_aux = [], []
             self.ts_iou_pred_ano, self.ts_iou_pred_aux_ano = [], []
             self.ts_acc_pred_ano, self.ts_acc_pred_aux_ano = [], []
+            # uncertainty part
+            self.ts_weight_cls = {}
+            self.n_samples = {}
+
     
     def on_train_epoch_start(self):
         super().on_train_epoch_start()
@@ -205,6 +210,30 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
                             [self.y_exist, self.ts_masks, self.ts_masks_aux, self.ts_iou, self.ts_iou_aux, self.ts_iou_pred, self.ts_iou_pred_aux, self.ts_acc, self.ts_acc_aux, self.ts_acc_pred, self.ts_acc_pred_aux, self.ts_exist, self.ts_exist_aux, self.ts_iou_pred_ano, self.ts_iou_pred_aux_ano, self.ts_acc_pred_ano, self.ts_acc_pred_aux_ano]):
                 h.create_dataset(k, data=np.concatenate(v, axis=0))
                 v.clear()
+
+
+    def _get_test_uncertainty(self, batch, batch_idx):
+        # get data
+        x, ys, waves, y_exists, n_classes, prompt_tokens, if_weak_lbl, cls_name_keys = \
+            self._get_data(batch, return_single=False)
+
+        # image embeddings
+        img_feats = self._get_image_embed(x, waves, True)
+
+        # uncertainty estimation
+        for y, y_exist, n_class, prompt_token, name_key in zip(ys, y_exists, n_classes, prompt_tokens, cls_name_keys): 
+            # initialize weight and n_sample dicts
+            if name_key not in self.n_samples:
+                self.n_samples[cls_name_keys] = [0]*n_class
+                self.ts_weight_cls[cls_name_keys] = [0.]*n_class
+
+            # calculate uncertainty and weights
+            text_embeddings = self._get_text_embeddings(prompt_token)
+            hetero_uncs = self._get_hetero_uncertainty(y, img_feats, text_embeddings)
+            weights = torch.exp(-hetero_uncs)
+
+        return 
+
 
     def _get_weak_loss_weight(self, current):
         """Exponential rampup from https://arxiv.org/abs/1610.02242"""

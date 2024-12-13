@@ -1,10 +1,12 @@
 import pickle
+import torch
 import numpy as np
 from torch.utils.data import Dataset
 import lmdb
 
 from dataset.data_properties_landsat import *
 
+############################### FOR USFS LC ################################
 # LBL_KEYS = ['lc', 'lu']
 LBL_KEYS = ['lu']
 

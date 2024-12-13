@@ -69,7 +69,8 @@ class LoveDADataset(Dataset):
 
         # reorder class indexes
         # final: Background=0, Building=1, Road=2, Water=3, Barren=4, Forest=5, Agricultural=6
-        lbl = lbl-1
+        # lbl = lbl-1
+        lbl = np.where(lbl>0, lbl-1, MASK_CODE)
         
         # transform for (img,lbl) pairs
         try:

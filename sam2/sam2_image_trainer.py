@@ -45,7 +45,9 @@ MASK_CODE = 255
 INPUT_SIZE = 1024
 TEXT_PREFIX = 'A photo of '
 
-MULTI_MASK_KEYS = {# 'usfs': ['usfs-lc', 'usfs-lu'],
+
+############################### FOR USFS LC ################################
+MULTI_MASK_KEYS = {#'usfs': ['usfs-lc', 'usfs-lu'],
                    'nlcd': ['nlcd-lc', 'nlcd-imp']}
 
 class SAM2ImageTrainer(pl.LightningModule):
@@ -91,9 +93,6 @@ class SAM2ImageTrainer(pl.LightningModule):
                                 load_aux_decoder_weights=args.load_aux_de,
                                 dofa_unfix_weights=args.dofa_unfix_weights, 
                                 hydra_overrides_extra=hydra_overrides_extra)
-        
-        # for uncertainty estimate from the auxiliary branch
-        self.weak_detach = args.weak_detach
 
         # Spatial dim for backbone feature maps
         self._bb_feat_sizes = [
@@ -391,7 +390,10 @@ class SAM2ImageTrainer(pl.LightningModule):
         # save results
         self.ys.append(y.cpu().numpy().astype(np.uint8))
         self.y_exist.append(y_exist.cpu().numpy().astype(np.uint8))
-        self.ts_masks.append(masks.detach().cpu().numpy()) # .argmax(axis=1).astype(np.uint8))
+        if self.save_acc_only:
+            self.ts_masks.append(masks.detach().cpu().to(torch.float32).numpy().argmax(axis=1).astype(np.uint8))
+        else:
+            self.ts_masks.append(masks.detach().cpu().to(torch.float32).numpy()) 
         # self.ts_masks_aux.append(masks_aux.detach().cpu().numpy()) #.argmax(axis=1).astype(np.uint8))
         self.ts_iou.append(ious.cpu().numpy())
         # self.ts_iou_aux.append(ious_aux.cpu().numpy())
@@ -409,24 +411,24 @@ class SAM2ImageTrainer(pl.LightningModule):
 
     def on_test_epoch_end(self):
         # calculate iou from all samples
-        ys = np.concatenate(self.ys, axis=0)
-        ys = np.where(ys!=MASK_CODE, ys+1, 0)
-        ts_masks = np.concatenate(self.ts_masks, axis=0)
-        n_classes = ts_masks.shape[1]
-        ts_masks = np.argmax(ts_masks, axis=1)+1
-        ts_masks[ys==0] = 0
-        ts_iou_all, ts_oa = self._calculate_acc_from_all(ts_masks, ys, n_classes)
+        self.ys = np.concatenate(self.ys, axis=0)
+        self.ys = np.where(self.ys!=MASK_CODE, self.ys+1, 0)
+        self.ts_masks = np.concatenate(self.ts_masks, axis=0)+1
+        n_classes = np.max(self.ys)
+        self.ts_masks[self.ys==0] = 0
+        ts_iou_all, ts_oa = self._calculate_acc_from_all(self.ts_masks, self.ys, n_classes)
         accs = np.array(ts_iou_all+[ts_oa])
 
         if self.save_acc_only:
             # patch-wise accuracies
-            ts_iou = np.concatenate(self.ts_iou, axis=0)
-            ts_acc = np.concatenate(self.ts_acc, axis=0)
-            ts_iou_pwise = np.concatenate([ts_iou, 
-                                           np.mean(ts_iou, axis=1, keepdims=True),
-                                           np.mean(ts_acc, axis=1, keepdims=True)], 
+            self.ts_iou = np.concatenate(self.ts_iou, axis=0)
+            self.ts_acc = np.concatenate(self.ts_acc, axis=0)
+            ts_iou_pwise = np.concatenate([self.ts_iou, 
+                                           np.mean(self.ts_iou, axis=1, keepdims=True),
+                                           np.mean(self.ts_acc, axis=1, keepdims=True)], 
                                            axis=1)
-            ts_iou_pwise = np.concatenate([ts_iou_pwise, np.mean(ts_iou_pwise, axis=0, keepdims=True)], axis=0)
+            # ts_iou_pwise = np.concatenate([ts_iou_pwise, np.mean(ts_iou_pwise, axis=0, keepdims=True)], axis=0)
+            ts_iou_pwise = np.mean(ts_iou_pwise, axis=0, keepdims=True)
             ts_ious = np.concatenate([np.reshape(accs, (1,-1)), ts_iou_pwise], axis=0)
             np.save(self.test_save_path, ts_ious)
         else:
