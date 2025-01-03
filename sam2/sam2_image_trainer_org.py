@@ -4,8 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-
-import logging
+import h5py
 import wandb
 import random
 
@@ -23,9 +22,10 @@ from torch.nn import functional as F
 
 # from segmentation_models_pytorch.losses import DiceLoss, FocalLoss
 from kornia.losses import (                   # type: ignore
-    dice_loss, binary_focal_loss_with_logits,  
+    dice_loss, binary_focal_loss_with_logits, focal_loss,
     FocalLoss, DiceLoss
 )
+from sam2.utils.myLosses import SoftDiceLoss
 
 # import sam2 package
 # from sam2.modeling.sam2_base import SAM2Base
@@ -45,7 +45,9 @@ MASK_CODE = 255
 INPUT_SIZE = 1024
 TEXT_PREFIX = 'A photo of '
 
-MULTI_MASK_KEYS = {'usfs': ['usfs-lc', 'usfs-lu'],
+
+############################### FOR USFS LC ################################
+MULTI_MASK_KEYS = {#'usfs': ['usfs-lc', 'usfs-lu'],
                    'nlcd': ['nlcd-lc', 'nlcd-imp']}
 
 class SAM2ImageTrainer(pl.LightningModule):
@@ -77,9 +79,15 @@ class SAM2ImageTrainer(pl.LightningModule):
         if args.mute_adaptor: hydra_overrides_extra += ['++model.image_encoder.trunk.adaptor=None']
         if args.dofa_unfix_weights: 
             hydra_overrides_extra += ['++model.image_encoder.trunk.dofa_unfix_weights=True']
-            self.dofa_lr_scale = args.dofa_lr_scale
         else:
             assert args.dofa_lr_scale==1, f'dofa_lr_scale={args.dofa_lr_scale}, but dofa_unfix_weights is False!'
+        self.dofa_lr_scale = args.dofa_lr_scale
+        # logvar smoother
+        self.use_logvar_smooth = args.use_logvar_smooth
+        if args.use_logvar_smooth:
+            hydra_overrides_extra += ['++model.use_logvar_smooth=True']
+            if args.fix_logvar_smooth:
+                hydra_overrides_extra += ['++model.fix_logvar_smooth=True']
         self.model = build_sam2(args.config_file, args.ckpt_path, args.ckpt_path_clip, 
                                 load_decoder_weights=args.load_de,
                                 load_aux_decoder_weights=args.load_aux_de,
@@ -94,7 +102,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         ]
 
         # others TO BE DEFINED
-        self.multimask_output = False
+        # self.multimask_output = False
         self.tokenizer = SimpleTokenizer()
         self.share_connect = args.share_connect
         # self.n_prompts = args.n_prompts if type(args.n_prompts)==type([]) else [args.n_prompts]
@@ -106,6 +114,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         # set up the losses: dice and focal
         self.use_multiclass_loss = args.use_multiclass_loss
         self.use_class_weights = args.use_class_weights
+        self.class_weights_scale = args.class_weights_scale
         self._set_loss_functions()
         # self.wunsure = args.winlbl  # incompletely labeled patches are regarded as unsure, assigning a smaller weight
         # optimizer
@@ -115,9 +124,28 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.schdt = args.schdt
         self.schdv = args.schdv
         self.max_epochs = args.epochs
-        self.n_train_batches = int(args.n_batch_tr/args.ntasks)
+        if args.test_only:
+            self.n_train_batches = 1
+        else:
+            self.n_train_batches = int(args.n_batch_tr/args.ntasks)
         # display interval
         self.display_inv = args.display_inv
+
+        if args.test_only:
+            self.test_save_path = args.test_save_path
+            assert self.test_save_path.endswith('.h5') or self.test_save_path.endswith('.npy'), 'Test save path must be a .h5 or .npy file!'
+            # for gt
+            self.ys = []
+            # for pred
+            self.y_exist = []
+            self.ts_masks = []
+            self.ts_iou, self.ts_iou_pred = [], []
+            self.ts_acc, self.ts_acc_pred = [], []
+            self.ts_exist = []
+
+            # test mode
+            self.save_acc_only = True if self.test_save_path.endswith('.npy') else False
+            
 
     # ------ forward propogation ------ #
     def forward(self, x, prompt, waves=None, use_aux=False):  # text prompt: here is the tokenized tensor
@@ -136,14 +164,17 @@ class SAM2ImageTrainer(pl.LightningModule):
         return masks, iou_predictions, precise_predictions, exist_predictions, img_feats, text_embeddings
     
 
-    def forward_decoder(self, img_feats, text_embeddings, n_classes, batch_size, use_aux=False):
+    def forward_decoder(self, img_feats, text_embeddings, n_classes, batch_size, use_aux=False, return_multiple=False, one_no_noise_mask_embed=False):
         _, _, h, w = img_feats["image_embed"].shape   # [batch_size, 256, 16, 16]
         # noise mask embeddings
-        if type(use_aux)==bool:
-            no_noise_mask_embed = self.model.no_noise_mask_embed_aux if use_aux else self.model.no_noise_mask_embed
+        if one_no_noise_mask_embed:
+            no_noise_mask_embed = self.model.no_noise_mask_embed
         else:
-            assert type(use_aux)==int, 'use_aux should be either boolean or integer!'
-            no_noise_mask_embed = getattr(self.model, f'no_noise_mask_embed_aux_{use_aux}') 
+            if type(use_aux)==bool:
+                no_noise_mask_embed = self.model.no_noise_mask_embed_aux if use_aux else self.model.no_noise_mask_embed
+            else:
+                assert type(use_aux)==int, 'use_aux should be either boolean or integer!'
+                no_noise_mask_embed = getattr(self.model, f'no_noise_mask_embed_aux_{use_aux}') 
         noise_mask_embeddings = no_noise_mask_embed.weight.reshape(1, -1, 1, 1).expand(
             n_classes*batch_size, -1, h, w
             )
@@ -159,12 +190,13 @@ class SAM2ImageTrainer(pl.LightningModule):
             mask_decoder,
             img_feats, text_embeddings, noise_mask_embeddings,
             n_classes, batch_size,
-            high_res_key)
+            high_res_key,
+            return_multiple=return_multiple)
         
         return masks, iou_predictions, precise_predictions, exist_predictions
 
     
-    def forward_decoder_w_mask(self, noise_mask, img_feats, text_embeddings, use_aux=False):
+    def forward_decoder_w_mask(self, noise_mask, img_feats, text_embeddings, use_aux=False, return_multiple=False):
         n_classes = text_embeddings.shape[0]
         batch_size = noise_mask.shape[0]
         # prepare binary masks
@@ -182,7 +214,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         if type(use_aux)==bool:
             sam_noise_mask_downscaling = self.model.sam_noise_mask_downscaling_aux if use_aux else self.model.sam_noise_mask_downscaling
         else:
-            sam_noise_mask_downscaling = self.model.sam_noise_mask_downscaling_auxs[use_aux]
+            sam_noise_mask_downscaling = getattr(self.model, f'sam_noise_mask_downscaling_aux_{use_aux}') 
         noise_mask_embeddings = sam_noise_mask_downscaling(noise_mask)
 
         # make predictions
@@ -190,13 +222,14 @@ class SAM2ImageTrainer(pl.LightningModule):
             mask_decoder = self.model.sam_mask_decoder_aux if use_aux else self.model.sam_mask_decoder
             high_res_key = 'high_res_feats_aux' if use_aux else 'high_res_feats'
         else:
-            mask_decoder = self.model.sam_mask_decoder_auxs[use_aux]
+            mask_decoder = getattr(self.model, f'sam_mask_decoder_aux_{use_aux}')
             high_res_key = f'high_res_feats_aux_{use_aux}'
         masks, iou_predictions, precise_predictions, exist_predictions = self._pred_mask_and_iou(
             mask_decoder,
             img_feats, text_embeddings, noise_mask_embeddings,
             n_classes, batch_size,
-            high_res_key)
+            high_res_key,
+            return_multiple=return_multiple)
         
         return masks, iou_predictions, precise_predictions, exist_predictions
         
@@ -275,23 +308,44 @@ class SAM2ImageTrainer(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # main step
         # get data
-        x, y, waves, y_exist, n_classes, prompt_tokens, _, _ = self._get_data(batch)
+        x, ys, waves, y_exists, n_classes, prompt_tokens, if_weak_lbl, cls_name_keys = \
+            self._get_data(batch, return_single=False)
         
-        # prediction
-        masks, iou_predictions, precise_predictions, exist_predictions, _, _ = \
-            self.forward(x, prompt_tokens, waves)
+        # # # major forward process # # #            
+        # image embeddings
+        img_feats = self._get_image_embed(x, waves, False)
+
+        # make predictions and calculate losses
+        loss = torch.tensor(0., device=self.device)
+        for y, y_exist, n_class, prompt_token, name_key in zip(ys, y_exists, n_classes, prompt_tokens, cls_name_keys): 
+            text_embeddings = self._get_text_embeddings(prompt_token)
+
+            # prediction
+            masks, iou_predictions, precise_predictions, exist_predictions = \
+                self.forward_decoder(img_feats, text_embeddings, n_class, x.shape[0])
         
-        # prediction accuracies
-        precises, ious = self._get_accs(masks.detach(), y)
+            # prediction accuracies
+            if if_weak_lbl:
+                precises, ious =  None, None
+            else:
+                precises, ious = self._get_accs(masks.detach(), y)
         
-        # calculate losses 
-        loss = self._calculate_loss(n_classes, y, y_exist, ious, precises, 
-                        masks, exist_predictions, iou_predictions, precise_predictions,
-                        )
+            # calculate losses 
+            class_weights = self.class_weight_tensors[name_key] if self.use_class_weights else None
+            loss_ = self._calculate_loss(n_class, y, y_exist, ious, precises, 
+                                         masks, exist_predictions, iou_predictions, precise_predictions,
+                                         class_weights=class_weights, log=False,
+                                         )
+
+            # training image examples  
+            if batch_idx<2 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
+                self._log_imgs(f'tr_{name_key}', x[0], masks[0], y[0])
+            
+            # losses.append(loss)
+            loss = loss + loss_
         
-        # training image examples  
-        if batch_idx==0 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
-            self._log_imgs('tr', x[0], masks[0], y[0])
+        # log loss
+        self.log('tr_loss', loss, on_epoch=True, on_step=False, sync_dist=True) #, batch_size=x.shape[0])
         
         return loss
     
@@ -299,8 +353,15 @@ class SAM2ImageTrainer(pl.LightningModule):
     def on_train_epoch_start(self):
         # class weights
         if self.current_epoch==0 and self.use_class_weights:
-                self.class_weight_tensors = \
-                    {k:torch.tensor(class_weight_list[k], device=self.device) for k in class_weight_list}
+            self.class_weight_tensors = \
+                {k:torch.tensor(class_weight_list[k], device=self.device) for k in class_weight_list}
+            if self.class_weights_scale!=10:
+                assert self.class_weights_scale>1 and self.class_weights_scale<10, 'class_weight_scale should be larger than 1 and smaller than 10!'
+                for k in self.class_weight_tensors:
+                    self.class_weight_tensors[k] = (self.class_weight_tensors[k]*(self.class_weights_scale-1)-self.class_weights_scale+10)/9
+            if self.trainer.global_rank==0:
+                print(f'Class weights are used with scale={self.class_weights_scale}!')
+                print(f'Class weights: {self.class_weight_tensors}')
         # print(f'Starting epoch {self.current_epoch}')
         # return super().on_train_epoch_start()
     
@@ -310,7 +371,91 @@ class SAM2ImageTrainer(pl.LightningModule):
 
 
     def test_step(self, batch, batch_idx):
-        self._do_validation(batch, batch_idx, prefix='test')
+        # get data
+        x, y, waves, y_exist, n_classes, prompt_tokens, _, _ = self._get_data(batch)
+        # bs = x.shape[0]
+
+        # prediction
+        with torch.no_grad():
+            masks, iou_predictions, precise_predictions, existance_predictions, _, _ = \
+                self.forward(x, prompt_tokens, waves, use_aux=False)
+        
+        if x.shape[-2:] != masks.shape[-2:]:
+            masks = F.interpolate(masks, size=x.shape[-2:], mode='bilinear', align_corners=False)
+
+        # accuracies of mask predictions
+        accs, ious = self._get_accs(masks.detach(), y)
+        # accs_aux, ious_aux = self._get_accs(masks_aux.detach(), y)
+        
+        # save results
+        self.ys.append(y.cpu().numpy().astype(np.uint8))
+        self.y_exist.append(y_exist.cpu().numpy().astype(np.uint8))
+        if self.save_acc_only:
+            self.ts_masks.append(masks.detach().cpu().to(torch.float32).numpy().argmax(axis=1).astype(np.uint8))
+        else:
+            self.ts_masks.append(masks.detach().cpu().to(torch.float32).numpy()) 
+        # self.ts_masks_aux.append(masks_aux.detach().cpu().numpy()) #.argmax(axis=1).astype(np.uint8))
+        self.ts_iou.append(ious.cpu().numpy())
+        # self.ts_iou_aux.append(ious_aux.cpu().numpy())
+        self.ts_iou_pred.append(iou_predictions.detach().cpu().numpy())
+        # self.ts_iou_pred_aux.append(iou_predictions_aux.detach().cpu().numpy())
+        self.ts_acc.append(accs.cpu().numpy())
+        # self.ts_acc_aux.append(accs_aux.cpu().numpy())
+        self.ts_acc_pred.append(precise_predictions.detach().cpu().numpy())
+        # self.ts_acc_pred_aux.append(precise_predictions_aux.detach().cpu().numpy())
+        self.ts_exist.append((existance_predictions.detach().cpu().numpy()>0).astype(np.uint8))
+
+        del masks 
+        torch.cuda.empty_cache()
+
+
+    def on_test_epoch_end(self):
+        # calculate iou from all samples
+        self.ys = np.concatenate(self.ys, axis=0)
+        self.ys = np.where(self.ys!=MASK_CODE, self.ys+1, 0)
+        self.ts_masks = np.concatenate(self.ts_masks, axis=0)+1
+        n_classes = np.max(self.ys)
+        self.ts_masks[self.ys==0] = 0
+        ts_iou_all, ts_oa = self._calculate_acc_from_all(self.ts_masks, self.ys, n_classes)
+        accs = np.array(ts_iou_all+[ts_oa])
+
+        if self.save_acc_only:
+            # patch-wise accuracies
+            self.ts_iou = np.concatenate(self.ts_iou, axis=0)
+            self.ts_acc = np.concatenate(self.ts_acc, axis=0)
+            ts_iou_pwise = np.concatenate([self.ts_iou, 
+                                           np.mean(self.ts_iou, axis=1, keepdims=True),
+                                           np.mean(self.ts_acc, axis=1, keepdims=True)], 
+                                           axis=1)
+            # ts_iou_pwise = np.concatenate([ts_iou_pwise, np.mean(ts_iou_pwise, axis=0, keepdims=True)], axis=0)
+            ts_iou_pwise = np.mean(ts_iou_pwise, axis=0, keepdims=True)
+            ts_ious = np.concatenate([np.reshape(accs, (1,-1)), ts_iou_pwise], axis=0)
+            np.save(self.test_save_path, ts_ious)
+        else:
+            with h5py.File(self.test_save_path, 'w') as h:
+                # accuracies from all the data
+                h.create_dataset('ts_iou_all', data=accs)
+                # for k, v in zip(['y_exist', 'ts_masks', 'ts_masks_aux', 'ts_iou', 'ts_iou_aux', 'ts_iou_pred', 'ts_iou_pred_aux', 'ts_acc', 'ts_acc_aux', 'ts_acc_pred', 'ts_acc_pred_aux', 'ts_exist', 'ts_exist_aux', 'ts_iou_pred_ano', 'ts_iou_pred_aux_ano', 'ts_acc_pred_ano', 'ts_acc_pred_aux_ano'], 
+                #                 [self.y_exist, self.ts_masks, self.ts_masks_aux, self.ts_iou, self.ts_iou_aux, self.ts_iou_pred, self.ts_iou_pred_aux, self.ts_acc, self.ts_acc_aux, self.ts_acc_pred, self.ts_acc_pred_aux, self.ts_exist, self.ts_exist_aux, self.ts_iou_pred_ano, self.ts_iou_pred_aux_ano, self.ts_acc_pred_ano, self.ts_acc_pred_aux_ano]):
+                for k, v in zip(['y_exist', 'ts_masks', 'ts_iou', 'ts_iou_pred', 'ts_acc', 'ts_acc_pred', 'ts_exist'], 
+                                [self.y_exist, self.ts_masks, self.ts_iou, self.ts_iou_pred, self.ts_acc, self.ts_acc_pred, self.ts_exist]):
+                    h.create_dataset(k, data=np.concatenate(v, axis=0))
+                    v.clear()
+        
+
+    def _calculate_acc_from_all(self, pred, gt, n_classes):
+        ious = []
+        for i in range(1,n_classes+1):
+            pred_ = (pred == i).astype(float)   
+            gt_ = (gt == i).astype(float)
+            intersection = np.sum(pred_ * gt_)
+            union = np.sum(pred_) + np.sum(gt_) - intersection
+            iou = intersection / union
+            ious.append(iou)
+        ious.append(np.mean(ious))
+        tmp = pred==gt
+        oa = np.sum(tmp[gt>0])/np.sum(gt>0)
+        return ious, oa
 
 
     # ------ Model utilities ------ #
@@ -447,7 +592,7 @@ class SAM2ImageTrainer(pl.LightningModule):
 
 
     def _pred_mask_and_iou(self, decoder, img_feats, text_embeddings, noise_mask_embeddings,
-                           n_classes, batch_size, high_res_key='high_res_feats'):
+                           n_classes, batch_size, high_res_key='high_res_feats', return_multiple=False):
         # rearrange text embeddings
         text_embeddings = rearrange(text_embeddings.unsqueeze(0).expand(batch_size, -1, -1),
                                     'batch_size n_classes dim -> (n_classes batch_size) dim', 
@@ -462,30 +607,39 @@ class SAM2ImageTrainer(pl.LightningModule):
         # get predictions
         masks, iou_predictions, precise_predictions, exist_predictions = decoder(
             image_embeddings=img_feats["image_embed"].repeat(n_classes, 1, 1, 1),
-            multimask_output=self.multimask_output,
             text_embeddings=text_embeddings.unsqueeze(1),
             noise_mask_embeddings=noise_mask_embeddings,
             high_res_features=high_res_features,
+            multimask_output=return_multiple,
         )
 
+        # mask predictions
         # masks = (torch.clamp(masks, -32.0, 32.0) + 32.0)/64.0
-        masks = torch.clamp(masks, -32.0, 32.0)
-        masks = rearrange(torch.squeeze(masks, dim=1), 
-                          '(n_classes batch_size) H W -> batch_size n_classes H W',
-                          batch_size=batch_size,
-                          n_classes=n_classes)
-        
+        if return_multiple:
+            n_mask = masks.shape[1]
+            masks = rearrange(masks,
+                              '(n_classes batch_size) n_mask H W -> n_mask batch_size n_classes H W',
+                              batch_size=batch_size,
+                              n_classes=n_classes,
+                              n_mask=n_mask)
+        else:
+            masks = torch.clamp(masks, -32.0, 32.0)
+            masks = rearrange(torch.squeeze(masks, dim=1), 
+                            '(n_classes batch_size) H W -> batch_size n_classes H W',
+                            batch_size=batch_size,
+                            n_classes=n_classes)
+            
         # accuracy predictions
-        iou_predictions = rearrange(torch.squeeze(iou_predictions, dim=1), 
+        iou_predictions = rearrange(iou_predictions[:,0], 
                                     '(n_classes batch_size) -> batch_size n_classes',
                                     batch_size=batch_size,
                                     n_classes=n_classes)
-        precise_predictions = rearrange(torch.squeeze(precise_predictions, dim=1), 
+        precise_predictions = rearrange(precise_predictions[:,0], 
                                         '(n_classes batch_size) -> batch_size n_classes',
                                         batch_size=batch_size,
                                         n_classes=n_classes)
         exist_predictions = torch.clamp(exist_predictions, -32.0, 32.0)
-        exist_predictions = rearrange(torch.squeeze(exist_predictions, dim=1),
+        exist_predictions = rearrange(exist_predictions[:,0],
                                       '(n_classes batch_size) -> batch_size n_classes',
                                       batch_size=batch_size,
                                       n_classes=n_classes)
@@ -499,7 +653,18 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.L1Loss = nn.L1Loss(reduction='none')
         self.BCELoss_noreduce = nn.BCEWithLogitsLoss(reduction='none') 
 
-        # multi-class loss
+        # soft dice loss
+        self.SoftBDLoss = SoftDiceLoss(mode='multilabel', 
+                                       from_logits=True, 
+                                       average='macro',
+                                       ignore_index=MASK_CODE)
+        self.SoftDLoss  = SoftDiceLoss(mode='multiclass', 
+                                       from_logits=True, 
+                                       average='micro',
+                                       ignore_index=MASK_CODE)
+
+
+        # hard multi-class loss
         if self.use_multiclass_loss:
             self.CELoss = nn.CrossEntropyLoss(ignore_index=MASK_CODE)
             self.DLoss = DiceLoss(average='micro', 
@@ -587,7 +752,7 @@ class SAM2ImageTrainer(pl.LightningModule):
     def _calculate_loss(self, n_classes, y, y_exist=None, ious=None, precises=None,
                         mask_predictions=None, exist_predictions=None, 
                         iou_predictions=None, precise_predictions=None,
-                        class_weights=None, hete_uncertainty=None,
+                        class_weights=None, weights_list=None,
                         from_aux_decoder=False, log=True):
         aux_tag = '_aux' if from_aux_decoder else ''
 
@@ -599,53 +764,71 @@ class SAM2ImageTrainer(pl.LightningModule):
         y_one_hot = F.one_hot(y.clamp(0, n_classes - 1), num_classes=n_classes).permute(0, 3, 1, 2)  # Reshape to [5, 3, 4, 4]
         y_one_hot = y_one_hot * mask
         y_one_hot_wnodata = y_one_hot * mask + (~mask) * MASK_CODE
-        # # class weights
-        # if class_weights is not None:
-        #     reduce='none'
-        #     n_total = mask.sum()*n_classes
-        # else:
-        #     reduce='mean'
         # get weights from hete_uncertainty
-        if hete_uncertainty is not None:  
-            weights_ = torch.exp(-hete_uncertainty)/2
-            weights = mask[:,None].float()*weights_
+        if weights_list is not None:  
+            weights = mask.float()*weights_list[0]
+            pixel_weights_mean = mask.float()[:,0]*weights_list[1]
         else:
-            weights = mask.float()
+            weights = None
+
+            
         for w, k in zip([self.wdice, self.wfocal, self.wce], ['dice', 'focal', 'bce']):
             if w>0:
                 if k=='bce':
+                    reduce = 'mean' if weights is None else 'none'
                     loss_ = w*F.binary_cross_entropy_with_logits(
                         mask_predictions, y_one_hot.float(), 
-                        weight=weights, 
+                        weight=mask.float(), 
                         pos_weight=class_weights[:, None, None] if class_weights is not None else None, 
-                        reduction='mean',
+                        reduction=reduce,
                     )
+                    if reduce == 'none':
+                        loss_ = (loss_*weights)[mask].mean()
                 elif k=='dice':
-                    loss_ = w*dice_loss(
-                        mask_predictions, y, 
-                        average='macro', weight=class_weights,
-                        ignore_index=MASK_CODE
-                    )
+                    if weights is None:
+                        loss_ = w*dice_loss(
+                            mask_predictions, y, 
+                            average='macro', weight=class_weights,
+                            ignore_index=MASK_CODE
+                        )
+                    else: 
+                        loss_ = w*self.SoftBDLoss(mask_predictions, y_one_hot_wnodata, 
+                                                  weights=weights,
+                                                  class_weights=class_weights,)
                     loss_ = loss_ * n_classes
                 elif k=='focal':
+                    reduce = 'mean' if weights is None else 'none'
                     loss_ = w*binary_focal_loss_with_logits(
                         mask_predictions, y_one_hot_wnodata,
-                        reduction='mean', pos_weight=class_weights,
+                        reduction=reduce, pos_weight=class_weights,
                         ignore_index=MASK_CODE,
                     )
-                    # if reduce=='none':
-                    #     loss_ = loss_.sum()/n_total  # (loss_.sum(axis=(0,2,3))/n_per_class).sum()
+                    if reduce=='none':
+                        loss_ = (loss_*weights)[mask].mean()  # (loss_.sum(axis=(0,2,3))/n_per_class).sum()
 
                 loss = loss+loss_
 
         # multi-class loss
         if self.use_multiclass_loss:
-            for L, w in zip([self.DLoss, self.FLoss, self.CELoss], [self.wdice, self.wfocal, self.wce]):
-                if w>0:
-                    loss_ = w*L(mask_predictions, y.clone())  # otherwise encounter the error: RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.LongTensor [6, 256, 256]] is at version 2; expected version 0 instead.
-                    loss = loss+loss_
-                else:
-                    continue
+            if weights is None:
+                for L, w in zip([self.DLoss, self.FLoss, self.CELoss], [self.wdice, self.wfocal, self.wce]):
+                    if w>0:
+                        loss_ = w*L(mask_predictions, y.clone())  # otherwise encounter the error: RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.LongTensor [6, 256, 256]] is at version 2; expected version 0 instead.
+                        loss = loss+loss_
+                    else:
+                        continue
+            else:
+                # pixel_weights_mean = weights.mean(axis=1)
+                for w, k in zip([self.wdice, self.wfocal, self.wce], ['dice', 'focal', 'ce']):
+                    if k == 'ce':
+                        loss_ = F.cross_entropy(mask_predictions, y, ignore_index=MASK_CODE, reduction='none')
+                        loss_ = w*(loss_*pixel_weights_mean)[mask[:,0]].mean() # loss_: [batch_size, h, w]
+                    elif k == 'dice':
+                        loss_ = w*self.SoftDLoss(mask_predictions, y, weights=pixel_weights_mean)
+                    elif k == 'focal':
+                        loss_ = focal_loss(mask_predictions, y, reduction='none', ignore_index=MASK_CODE, alpha=0.25)
+                        loss_ = loss_.mean(axis=(1))   # loss_: [batch_size, c, h, w]
+                        loss_ = w*(loss_*pixel_weights_mean)[mask[:,0]].mean()
         if log: self.log(f'tr{aux_tag}_loss_mask', loss, on_epoch=True, on_step=False, sync_dist=True)
         
         # existance loss
