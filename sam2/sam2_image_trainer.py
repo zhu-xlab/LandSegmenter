@@ -35,6 +35,7 @@ from sam2.modeling.text_simple_tokenizer import SimpleTokenizer
 
 from dataset.datasets_settings import class_names, class_weight_list    
 
+LOGIT_SCALE = 50
 FINAL_LR = 1e-6
 KEY_IMG = 'image'
 KEY_LBL = 'label'
@@ -47,7 +48,7 @@ TEXT_PREFIX = 'A photo of '
 
 
 ############################### FOR USFS LC ################################
-MULTI_MASK_KEYS = {#'usfs': ['usfs-lc', 'usfs-lu'],
+MULTI_MASK_KEYS = {'usfs': ['usfs-lc', 'usfs-lu'],
                    'nlcd': ['nlcd-lc', 'nlcd-imp']}
 
 class SAM2ImageTrainer(pl.LightningModule):
@@ -132,6 +133,9 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.display_inv = args.display_inv
 
         if args.test_only:
+            self.test_use_multiple_prompts = args.test_use_multiple_prompts
+            self.test_max_threshold = args.test_max_threshold
+            self.test_bg_idx = args.test_bg_idx
             self.test_save_path = args.test_save_path
             assert self.test_save_path.endswith('.h5') or self.test_save_path.endswith('.npy'), 'Test save path must be a .h5 or .npy file!'
             # for gt
@@ -323,6 +327,10 @@ class SAM2ImageTrainer(pl.LightningModule):
             # prediction
             masks, iou_predictions, precise_predictions, exist_predictions = \
                 self.forward_decoder(img_feats, text_embeddings, n_class, x.shape[0])
+            if masks.shape[-2:] != y.shape[-2:]:
+                # print('masks original shp:', masks.shape[-2:])
+                masks = F.interpolate(masks, size=y.shape[-2:], mode='bilinear', align_corners=False)
+                # print('masks new shp:', masks.shape[-2:])
         
             # prediction accuracies
             if if_weak_lbl:
@@ -371,18 +379,10 @@ class SAM2ImageTrainer(pl.LightningModule):
 
 
     def test_step(self, batch, batch_idx):
-        # get data
-        x, y, waves, y_exist, n_classes, prompt_tokens, _, _ = self._get_data(batch)
-        # bs = x.shape[0]
-
-        # prediction
-        with torch.no_grad():
-            masks, iou_predictions, precise_predictions, existance_predictions, _, _ = \
-                self.forward(x, prompt_tokens, waves, use_aux=False)
+        mask_func = self._get_test_masks_with_multiple_prompts if self.test_use_multiple_prompts else self._get_test_masks_with_unique_prompts
+        y, y_exist, masks, iou_predictions, precise_predictions, existance_predictions = \
+            mask_func(batch, batch_idx)
         
-        if x.shape[-2:] != masks.shape[-2:]:
-            masks = F.interpolate(masks, size=x.shape[-2:], mode='bilinear', align_corners=False)
-
         # accuracies of mask predictions
         accs, ious = self._get_accs(masks.detach(), y)
         # accs_aux, ious_aux = self._get_accs(masks_aux.detach(), y)
@@ -390,10 +390,14 @@ class SAM2ImageTrainer(pl.LightningModule):
         # save results
         self.ys.append(y.cpu().numpy().astype(np.uint8))
         self.y_exist.append(y_exist.cpu().numpy().astype(np.uint8))
+        # self.ts_masks.append(masks.detach().cpu().to(torch.float32).numpy().argmax(axis=1).astype(np.uint8))
         if self.save_acc_only:
-            self.ts_masks.append(masks.detach().cpu().to(torch.float32).numpy().argmax(axis=1).astype(np.uint8))
+            masks_ = masks.argmax(1)
+            if self.test_max_threshold > 0:
+                masks_[masks.max(1)[0] < self.test_max_threshold] = self.test_bg_idx
+            self.ts_masks.append(masks_.detach().cpu().numpy().astype(np.uint8))
         else:
-            self.ts_masks.append(masks.detach().cpu().to(torch.float32).numpy()) 
+            self.ts_masks.append(masks.detach().softmax(1).cpu().to(torch.float32).numpy()) 
         # self.ts_masks_aux.append(masks_aux.detach().cpu().numpy()) #.argmax(axis=1).astype(np.uint8))
         self.ts_iou.append(ious.cpu().numpy())
         # self.ts_iou_aux.append(ious_aux.cpu().numpy())
@@ -409,11 +413,60 @@ class SAM2ImageTrainer(pl.LightningModule):
         torch.cuda.empty_cache()
 
 
+    def _get_test_masks_with_unique_prompts(self, batch, batch_idx):
+        # get data
+        x, y, waves, y_exist, n_classes, prompt_tokens, _, _ = self._get_data(batch)
+        # bs = x.shape[0]
+
+        # prediction
+        with torch.no_grad():
+            masks, iou_predictions, precise_predictions, existance_predictions, _, _ = \
+                self.forward(x, prompt_tokens, waves, use_aux=False)
+        
+        if x.shape[-2:] != masks.shape[-2:]:
+            masks = F.interpolate(masks, size=x.shape[-2:], mode='bilinear', align_corners=False)
+        
+        return y, y_exist, masks, iou_predictions, precise_predictions, existance_predictions
+    
+
+    def _get_test_masks_with_multiple_prompts(self, batch, batch_idx):
+        # get data
+        x, y, waves, y_exist, n_prompt, class_id_list, prompt_tokens, dataset_name = self._get_data_with_multiple_prompts(batch)
+        num_cls = y_exist.shape[1]
+
+        # prediction
+        with torch.no_grad():
+            masks, iou_predictions, precise_predictions, existance_predictions, _, _ = \
+                self.forward(x, prompt_tokens, waves, use_aux=False)
+        
+        if x.shape[-2:] != masks.shape[-2:]:
+            masks = F.interpolate(masks, size=x.shape[-2:], mode='bilinear', align_corners=False)
+        
+        # get the largest logits among multiple prompts
+        masks = (masks*LOGIT_SCALE).softmax(1)
+        cls_index = F.one_hot(torch.tensor(class_id_list, device=self.device), num_cls)
+        cls_index = cls_index.view(1, n_prompt, num_cls, 1, 1)
+        
+        masks = (masks.unsqueeze(2) * cls_index).max(1)[0]
+
+        return y, y_exist, masks, iou_predictions, precise_predictions, existance_predictions
+
+
     def on_test_epoch_end(self):
         # calculate iou from all samples
         self.ys = np.concatenate(self.ys, axis=0)
         self.ys = np.where(self.ys!=MASK_CODE, self.ys+1, 0)
-        self.ts_masks = np.concatenate(self.ts_masks, axis=0)+1
+        if self.save_acc_only:
+            self.ts_masks = np.concatenate(self.ts_masks, axis=0)+1
+        else:
+            with h5py.File(self.test_save_path, 'w') as h:
+                h.create_dataset('ts_masks_ori', shape=(self.ys.shape[0], self.ts_masks[0].shape[1], self.ys.shape[1], self.ys.shape[2]), dtype=np.float32)
+                batch_size = self.ts_masks[0].shape[0]
+                for i, m in enumerate(self.ts_masks):
+                    end_id = min((i+1)*batch_size, self.ys.shape[0])
+                    h['ts_masks_ori'][i*batch_size:end_id] = m
+                    self.ts_masks[i] = m.argmax(axis=1)+1
+            self.ts_masks = np.concatenate(self.ts_masks, axis=0)
         n_classes = np.max(self.ys)
         self.ts_masks[self.ys==0] = 0
         ts_iou_all, ts_oa = self._calculate_acc_from_all(self.ts_masks, self.ys, n_classes)
@@ -432,15 +485,21 @@ class SAM2ImageTrainer(pl.LightningModule):
             ts_ious = np.concatenate([np.reshape(accs, (1,-1)), ts_iou_pwise], axis=0)
             np.save(self.test_save_path, ts_ious)
         else:
-            with h5py.File(self.test_save_path, 'w') as h:
+            with h5py.File(self.test_save_path, 'a') as h:
                 # accuracies from all the data
                 h.create_dataset('ts_iou_all', data=accs)
                 # for k, v in zip(['y_exist', 'ts_masks', 'ts_masks_aux', 'ts_iou', 'ts_iou_aux', 'ts_iou_pred', 'ts_iou_pred_aux', 'ts_acc', 'ts_acc_aux', 'ts_acc_pred', 'ts_acc_pred_aux', 'ts_exist', 'ts_exist_aux', 'ts_iou_pred_ano', 'ts_iou_pred_aux_ano', 'ts_acc_pred_ano', 'ts_acc_pred_aux_ano'], 
                 #                 [self.y_exist, self.ts_masks, self.ts_masks_aux, self.ts_iou, self.ts_iou_aux, self.ts_iou_pred, self.ts_iou_pred_aux, self.ts_acc, self.ts_acc_aux, self.ts_acc_pred, self.ts_acc_pred_aux, self.ts_exist, self.ts_exist_aux, self.ts_iou_pred_ano, self.ts_iou_pred_aux_ano, self.ts_acc_pred_ano, self.ts_acc_pred_aux_ano]):
                 for k, v in zip(['y_exist', 'ts_masks', 'ts_iou', 'ts_iou_pred', 'ts_acc', 'ts_acc_pred', 'ts_exist'], 
                                 [self.y_exist, self.ts_masks, self.ts_iou, self.ts_iou_pred, self.ts_acc, self.ts_acc_pred, self.ts_exist]):
-                    h.create_dataset(k, data=np.concatenate(v, axis=0))
-                    v.clear()
+                    if k == 'ts_masks':
+                        h.create_dataset(k, data=v.astype(np.uint8))
+                        del self.ts_masks
+                        self.ts_masks = []
+                    else:
+                        h.create_dataset(k, data=np.concatenate(v, axis=0))
+                        v.clear()
+        print('\n accs_all:', accs)
         
 
     def _calculate_acc_from_all(self, pred, gt, n_classes):
@@ -495,6 +554,38 @@ class SAM2ImageTrainer(pl.LightningModule):
             return x, ys[0], waves, y_exists[0], n_classes[0], prompt_tokens[0], if_weak_lbl, cls_name_keys[0]
         else:
             return x, ys, waves, y_exists, n_classes, prompt_tokens, if_weak_lbl, cls_name_keys
+
+
+    def _get_data_with_multiple_prompts(self, batch):
+        x = batch[KEY_IMG].contiguous()
+        y = batch[KEY_LBL].contiguous()
+        
+        waves = batch[KEY_WAVE][0]
+        dataset_name = batch[KEY_DATASAT][0]
+        # if_weak_lbl = batch[KEY_WEAKLBL][0]
+
+        # prepare prompts
+        cls_all = class_names[dataset_name]
+        num_class = len(cls_all)
+        CLS_DICT = {}
+        class_id_list = []
+        idx = 0
+        for k in cls_all:
+            class_id_list = class_id_list + [k]*len(cls_all[k])
+            for cls_str in cls_all[k]:
+                CLS_DICT[idx] = cls_str
+                idx += 1
+        
+        # existance GT
+        y_exist = torch.zeros((y.shape[0], num_class), device=self.device)
+        for i in range(num_class):
+            ye_ = (y==i).sum(axis=(1,2))
+            y_exist[:,i] = (ye_>0).to(y_exist.dtype)
+        
+        # prepare prompt
+        prompt_tokens, n_prompt = self._prepare_prompt(CLS_DICT, y)
+        
+        return x, y, waves, y_exist, n_prompt, class_id_list, prompt_tokens, dataset_name
 
 
     def _get_image_embed(
@@ -734,6 +825,8 @@ class SAM2ImageTrainer(pl.LightningModule):
         # prediction
         masks, iou_predictions, precise_predictions, existance_predictions, _, _ = \
             self.forward(x, prompt_tokens, waves, use_aux=use_aux)
+        if masks.shape[-2:] != y.shape[-2:]:
+            masks = F.interpolate(masks, size=y.shape[-2:], mode='bilinear', align_corners=False)
         
         # ious
         _, ious = self._get_accs(masks.detach(), y)
@@ -775,15 +868,16 @@ class SAM2ImageTrainer(pl.LightningModule):
         for w, k in zip([self.wdice, self.wfocal, self.wce], ['dice', 'focal', 'bce']):
             if w>0:
                 if k=='bce':
-                    reduce = 'mean' if weights is None else 'none'
+                    # reduce = 'mean' if weights is None else 'none'
                     loss_ = w*F.binary_cross_entropy_with_logits(
                         mask_predictions, y_one_hot.float(), 
                         weight=mask.float(), 
                         pos_weight=class_weights[:, None, None] if class_weights is not None else None, 
-                        reduction=reduce,
+                        reduction='none',
                     )
-                    if reduce == 'none':
-                        loss_ = (loss_*weights)[mask].mean()
+                    if weights is not None:
+                        loss_ = loss_*weights
+                    loss_ = loss_[mask].mean()
                 elif k=='dice':
                     if weights is None:
                         loss_ = w*dice_loss(
@@ -795,18 +889,17 @@ class SAM2ImageTrainer(pl.LightningModule):
                         loss_ = w*self.SoftBDLoss(mask_predictions, y_one_hot_wnodata, 
                                                   weights=weights,
                                                   class_weights=class_weights,)
-                    loss_ = loss_ * n_classes
                 elif k=='focal':
-                    reduce = 'mean' if weights is None else 'none'
+                    # reduce = 'mean' if weights is None else 'none'
                     loss_ = w*binary_focal_loss_with_logits(
                         mask_predictions, y_one_hot_wnodata,
-                        reduction=reduce, pos_weight=class_weights,
+                        reduction='none', pos_weight=class_weights,
                         ignore_index=MASK_CODE,
                     )
-                    if reduce=='none':
-                        loss_ = (loss_*weights)[mask].mean()  # (loss_.sum(axis=(0,2,3))/n_per_class).sum()
-
-                loss = loss+loss_
+                    if weights is not None:
+                        loss_ = loss_*weights
+                    loss_ = loss_[mask].mean() 
+                loss = loss + loss_ # * n_classes
 
         # multi-class loss
         if self.use_multiclass_loss:

@@ -1,5 +1,6 @@
 import datetime
 import os
+import pathlib
 import sys
 import numpy as np
 
@@ -24,6 +25,11 @@ from dataset import DWOSMDataset, OpenEarthMapDataset, MultiSenGeDataset, Vaihin
 import albumentations as A
 
 
+def get_subset_datasets(dataset, subset_proportion=1):
+    n_samples = int(len(dataset) * subset_proportion)
+    rng = np.random.default_rng(seed=42)
+    dataset = torch.utils.data.Subset(dataset, rng.choice(len(dataset), n_samples, replace=False))
+    return dataset
 
 # # # # # # # # # # main function # # # # # # # # # # 
 def main():
@@ -112,6 +118,10 @@ def main():
                                         transform=trans_tr)
         test_dataset = PotsdamDataset(datasets_settings_test[args.dataset_name]['data_path'],
                                       n_bands=n_channels,)
+    # subset
+    if args.dataset_proportion < 1:
+        train_dataset = get_subset_datasets(train_dataset, args.dataset_proportion)
+    sub_tag = f'sub{int(args.dataset_proportion*100)}' if args.dataset_proportion<1 else 'full'
     print(f'Dataset: {args.dataset_name} | #training: {len(train_dataset)} | #test: {len(test_dataset)} | Patch size: {patch_size}')
     
     # dataloaders
@@ -133,7 +143,8 @@ def main():
             else:
                 args.gname = f'sam2_adaptor_ft_{args.dofa_type}'
             # raise ValueError('Please provide the path to the pre-trained model for fine-tuning or mute the adaptor!')
-        args.pdir = 'Results_' + args.gname
+        args.gname += f'_{args.ckpt_path_clip.split("/")[-1][:4]}' # tag for language model
+        args.pdir = os.path.join(f'Results_{args.gname}', sub_tag)
     else:
         args.pdir = args.ft_wpath.split('checkpoints')[0]
         gname_list = args.pdir.split('/')[-4:-2]
@@ -141,7 +152,9 @@ def main():
         args.gname = args.gname + '_' + '_'.join(gname_list)
         resume_epoch = args.ft_wpath.split("epoch=")[-1].split("-")[0]
         args.gname += f'_fe{resume_epoch}'
-        args.pdir = os.path.join(args.pdir, f'fine_tune_fe{resume_epoch}')
+        args.pdir = os.path.join(args.pdir, f'fine_tune_fe{resume_epoch}_{sub_tag}')
+    # add sub-tag to the group name
+    if 'sub' in sub_tag: args.gname = f'{sub_tag}_{args.gname}'
     # lr
     ea = int(np.ceil(np.log10(1/args.lr)))
     eb = int(np.round(args.lr*10**ea))
@@ -168,11 +181,8 @@ def main():
     args.pdir = os.path.join(args.pdir, args.job_type)
     checkpoints_dir = os.path.join(args.pdir, 'checkpoints')
     # create directory
-    if not os.path.exists(args.pdir): 
-        try:
-            os.makedirs(args.pdir)
-        except Exception as inner_e:
-            assert os.path.exists(args.pdir), f'Fine-tuning directory does not exist and cannot be created: {args.pdir}. Error: {inner_e}'
+    p = pathlib.Path(args.pdir)
+    p.mkdir(parents=True, exist_ok=True)
     pred_fname = 'evaluation_results.npy'
     args.save_path = os.path.join(args.pdir, pred_fname)
     # setting logger
@@ -185,8 +195,6 @@ def main():
 
     ###### 3 - define the model ######
     torch.set_float32_matmul_precision('high')
-    # if args.use_sep_aux_de_weak:
-    #     args.dataset_name = ['dynamicearthnet', 'openearthmap', 'sbtn', 'worldcover', 'iran', 'ghsl', 'nlcd', 'usfs']
     # build model
     model = SAM2ImageTrainerFT(args)
     

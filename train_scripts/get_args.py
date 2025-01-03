@@ -90,7 +90,9 @@ def get_args_test_framework():
 
     # model setting
     parser.add_argument('--multiple_aux_decoder', type=int, default=1, help='Number of auxiliary decoders')
-
+    parser.add_argument('--test_max_threshold', type=float, default=-1)
+    parser.add_argument('--test_background_id', dest='test_bg_idx', type=int, default=0)
+    
     # get common arguments
     parser = get_common_args(parser)
 
@@ -107,6 +109,7 @@ def get_args_fine_tune():
     parser = argparse.ArgumentParser(description='Fine-tuning')
     # data settings
     parser.add_argument('--dataset_name', type=str, default='dw', help='Names of the datasets used for fine-tuning')
+    parser.add_argument('--dataset_proportion', type=float, default=1, help='Proportion of the dataset used for fine-tuning')
     parser.add_argument('--fine_tune_accuracy_branch', dest='fine_tune_acc', action='store_true', default=False, help='Whether to fine-tune accuracy branch or not')
     parser.add_argument('--fine_tune_checkpoint_path', dest='ft_wpath', type=str, default=None, help='Path of model weights to fine tune.')
     # for model weight optimization
@@ -138,7 +141,7 @@ def get_common_args(parser):
     # model settings
     parser.add_argument('--model-config-file', dest='config_file', type=str, default='sam2_hiera_l.yaml', help='Path to the model config file')
     parser.add_argument('--ckpt-path', type=str, default='checkpoints/sam2_hiera_large.pt', help='Path to the checkpoint file (sam2)')
-    parser.add_argument('--ckpt-path-clip', type=str, default='checkpoints/RemoteCLIP-ViT-B-32.pt', help='Path to the checkpoint file (clip)') 
+    parser.add_argument('--ckpt-path-clip', type=str, default='checkpoints/RS5M_ViT-B-32.pt', help='Path to the checkpoint file (clip)') 
     parser.add_argument('--load-decoder-weights', dest='load_de', action='store_true', default=False, help='Whether to load decoder weights or not')
     parser.add_argument('--load-aux-decoder-weights', dest='load_aux_de', action='store_true', default=False, help='Whether to load auxiliary decoder weights or not (only used when load_decoder_weights is True)')
     parser.add_argument('--use-separate-auxiliary-decoder-for-weak-labels', dest='use_sep_aux_de_weak', action='store_true', default=False, help='Whether to use separate auxiliary decoder for each weakly labeled dataset or not')
@@ -183,6 +186,7 @@ def get_common_args(parser):
     # for test
     parser.add_argument('--test_only', action='store_true', default=False, help='Only test models.')
     parser.add_argument('--test_weight_path', dest='ts_wpath', type=str, default=None, help='Path of test model weights.')
+    parser.add_argument('--test_use_multiple_prompts', action='store_true', default=False, help='Whether to use multiple prompts or not')
     # for debugging tag
     parser.add_argument('--debug', type=str, default='', help='Debugging tag')
     return parser
@@ -196,15 +200,11 @@ def set_log_files(args, w_unc=False):
     else:
         ctag = 'c' if args.share_connect else ''
         aux = f'_aux{noise_mask_loss_tag}{ctag}_attcp' if args.use_aux_decoder else '_attcp'
-    if isinstance(args.dataset_name, list):
-        dataset_tag = 'exact'
-    else:
-        dataset_tag = args.dataset_name
     # adaptor
     args.use_adaptor = not args.mute_adaptor
     if args.use_adaptor:
         if args.dofa_type in [None, 'None']:
-            args.gname = f'FT{aux}_{dataset_tag}'
+            args.gname = f'FT{aux}'
         else:
             if args.dofa_unfix_weights:
                 dofa_active = 'A'
@@ -212,16 +212,13 @@ def set_log_files(args, w_unc=False):
                     dofa_active += f'x{args.dofa_lr_scale}'  
             else:
                 dofa_active = ''                   
-            args.gname = f'FT_dofa{args.dofa_type[4]}{dofa_active}{aux}_{dataset_tag}'
+            args.gname = f'FT_dofa{args.dofa_type[4]}{dofa_active}{aux}'
     else:
-        args.gname = f'FT{aux}_woAd_{dataset_tag}'
+        args.gname = f'FT{aux}_woAd'
 
     # training size
-    if dataset_tag == args.dataset_name:
-        args.gname += f'_{args.ntr}' if args.ntr>0 else '_all'
-    else:
-        subset = '_sub' if args.subset_proportion<1 else ''
-        args.gname += f'{subset}_max{args.max_dataset_size}' if args.max_dataset_size is not None else ''
+    subset = f'_sub{args.subset_proportion}' if args.subset_proportion<1 else ''
+    args.gname += f'{subset}_max{args.max_dataset_size}' if args.max_dataset_size is not None else ''
 
     # using pretrained decoder or not
     if args.load_de:
@@ -230,6 +227,8 @@ def set_log_files(args, w_unc=False):
         args.gname += '_deN'
     # using multiclass loss or not
     args.gname += '_mcloss' if args.use_multiclass_loss else ''
+    # language model type
+    args.gname += f'_{args.ckpt_path_clip.split("/")[-1][:4]}'
     # # # # # # For debugging stage # # # # # 
     # args.gname += 'new' 
         

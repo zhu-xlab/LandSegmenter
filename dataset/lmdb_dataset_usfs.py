@@ -7,8 +7,8 @@ import lmdb
 from dataset.data_properties_landsat import *
 
 ############################### FOR USFS LC ################################
-# LBL_KEYS = ['lc', 'lu']
-LBL_KEYS = ['lu']
+LBL_KEYS = ['lc', 'lu']
+# LBL_KEYS = ['lu']
 
 class USFSDataset(Dataset):
     def __init__(self, lmdb_file=None,

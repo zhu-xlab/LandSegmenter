@@ -160,23 +160,23 @@ class_names = {
     },
 
     ############################### FOR USFS LC ################################
-    # 'usfs-lc':{
-    #     0: ['tree', 'forest', 'wood', 'broadleaf forest and coniferous forest', 'deciduous forest and evergreen forest', 'broadleaf tree and coniferous tree', 'deciduous tree and evergreen tree'],
-    #     1: ['mixed shrub and tree area', 'mixed scrub and tree area'],
-    #     2: ['mixed grass and tree area', 'mixed herb and tree area', 'mixed herbaceous and woody area'],
-    #     3: ['mixed barren and tree area', 'mixed barren and woody area'],
-    #     4: ['shrub and scrub', 'shrub', 'scrub'],
-    #     5: ['mixed grass and shrub area', 'mixed herb and shrub area', 'mixed grass and scrub area', 'mixed herb and scrub area'],
-    #     6: ['mixed barren and shrub area', 'mixed barren and scrub area'],
-    #     7: ['agricultural land and grassland', 'agricultural land and herbaceous vegetation', 'agricultural land and herb', 'grass or herb'],
-    #     8: ['mixed grass and barren area', 'mixed herb and barren area'],
-    #     9: ['barren and impervious area', 'barren land and impervious area'],
-    #     10:['snow and ice'],
-    #     11:['water', 'lake, reservoir, river and ocean'],
-    # },
+    'usfs-lc':{
+        0: ['tree', 'forest', 'wood', 'broadleaf forest and coniferous forest', 'deciduous forest and evergreen forest', 'broadleaf tree and coniferous tree', 'deciduous tree and evergreen tree'],
+        1: ['mixed shrub and tree area', 'mixed scrub and tree area'],
+        2: ['mixed grass and tree area', 'mixed herb and tree area', 'mixed herbaceous and woody area'],
+        3: ['mixed barren and tree area', 'mixed barren and woody area'],
+        4: ['shrub and scrub', 'shrub', 'scrub'],
+        5: ['mixed grass and shrub area', 'mixed herb and shrub area', 'mixed grass and scrub area', 'mixed herb and scrub area'],
+        6: ['mixed barren and shrub area', 'mixed barren and scrub area'],
+        7: ['agricultural land and grassland', 'agricultural land and herbaceous vegetation', 'agricultural land and herb', 'grass or herb'],
+        8: ['mixed grass and barren area', 'mixed herb and barren area'],
+        9: ['barren and impervious area', 'barren land and impervious area'],
+        10:['snow and ice'],
+        11:['water', 'lake, reservoir, river and ocean'],
+    },
 
-    # 'usfs-lu':{
-    'usfs':{
+    'usfs-lu':{
+    # 'usfs':{
         0: ['agricultural land', 'crop', 'cropland', 'arable land and permanent crop', 'herbaceous crop and woody crop', 'annual crop, orchard and vineyard'],
         1: ['developed area', 'urban area', 'residential, commercial, industrial and transportation area including artificial vegetation', 'built-up area'],
         2: ['tree and woody wetland', 'forest and woody wetland', 'wood and woody wetland', 'broadleaf forest, coniferous forest, and woody wetland', 'deciduous forest, evergreen forest, and woody wetland', 'broadleaf tree, coniferous tree, and woody wetland', 'deciduous tree, evergreen tree, and woody wetland'],
@@ -235,96 +235,61 @@ class_names = {
         1: ['built-up low-intensity impervious area'],   # sparely built-up areas
         2: ['industrial and commercial area'],              # Specialized built-Up Areas
         3: ['artificial, non-argricultural vegetation'],     # Specialized but vegetative areas     
-        4: ['transportation'],       # Large scale networks
-        5: ['arable land'],
+        4: ['transportation', 'road'],       # Large scale networks
+        5: ['arable land', 'herbaceous crop'],  
         6: ['vineyard'],
         7: ['orchard'],
-        8: ['grassland'],
+        8: ['grass'],
         9: ['shrub and scrub'],
-        10:['forest'],
-        11:['bare land including mine site'],
+        10:['forest', 'tree'],
+        11:['bare land', 'barren land', 'mine site'],
         12:['wetland'],
         13:['water'],
     },
-    # 'multisenge': {
-    #     0: ['built-up high-intensity imperious area'],  # Dense built-up areas
-    #     1: ['built-up low-intensity imperious area'],   # sparely built-up areas
-    #     2: ['industrial, commercial and transportation area'],              # Specialized built-Up Areas
-    #     3: ['artificial, non-argricultural vegetation'],     # Specialized but vegetative areas     
-    #     4: ['transportation area'],       # Large scale networks
-    #     5: ['arable land'],
-    #     6: ['vineyard'],
-    #     7: ['orchard'],
-    #     8: ['grassland'],
-    #     9: ['shrub and scrub'],
-    #     10:['forest'],
-    #     11:['bare land'],
-    #     12:['wetland'],
-    #     13:['water'],
-    # },
-
-    # # # # # these two correspond to the visualization order not the order saved in lmdb # # # # #
-    # 'osm':{
-    #     0: ['Urban fabric'],
-    #     1: ['Industrial, commercial and transport'],
-    #     2: ['Arable land'],
-    #     3: ['Artificial, non-argricultural vegetation'],
-    #     4: ['Forest'],
-    #     5: ['Mine, dump and construction sites'],
-    #     6: ['Water bodies'],
-    #     7: ['Open spaces'],
-    #     8: ['Pastures'],
-    #     9: ['Shrub and herbaceous associations'],
-    #     10:['Permanent crops'],
-    #     11:['Wetlands'],
-    #     12:['Coastal wetlands'],
-    # },
-
-    # 'osm':{
-    #     0: ['Urban fabric'],
-    #     1: ['Industrial, commercial and transport'],
-    #     2: ['Arable land'],
-    #     3: ['Artificial, non-argricultural vegetation'],
-    #     4: ['Forest'],
-    #     5: ['Mine, dump and construction sites'],
-    #     6: ['Waterbody'],
-    #     7: ['Open spaces'],
-    #     8: ['Pastureland'],
-    #     9: ['Shrub and herbaceous associations'],
-    #     10:['Permanent crops'],
-    #     11:['Wetlands'],
-    #     12:['Coastal wetlands'],
-    # },
-    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
+    
     'dw': {
-        0: ['water', 'Open water', 'Aquatic surface', 'Waterbody', 'Lake and river', 'Hydric zone', 'Aquatic zone', 'Marine and freshwater area'],
-        1: ['tree', 'Forest', 'Woodland', 'Canopy', 'Timberland', 'Forested area', 'Arboreal zone'],
-        2: ['grass', 'Grassland', 'Prairie', 'Savanna', 'Pastureland', 'Herbaceous cover'],
-        3: ['wetland', 'Flooded vegetation', 'Wetland vegetation', 'Marshland', 'Swamp plant', 'Riparian area', 'Aquatic vegetation'], 
-        4: ['crop', 'Farmland', 'Agricultural field', 'Cultivated land', 'Arable land', 'Cropland'],
-        5: ['shrub and scrub', 'Shrubland', 'Heath', 'Brushland', 'Chaparral', 'Low vegetation'],
-        6: ['built-up area', 'Urban area', 'Developed land', 'Residential and commercial zone', 'Infrastructure', 'Built-up land'],
-        7: ['bare land', 'Barren terrain', 'Open soil', 'Unvegetated land', 'Exposed earth'],
-        8: ['ice and snow', 'Glacial area', 'Snow cover', 'Ice field', 'Frozen surface'],
+        0: ['water'],
+        1: ['tree', 'forest', 'wood'],
+        2: ['grass', 'herb'], #'herbaceous vegetation', 'pasture', 'meadow'],
+        3: ['wetland'], 
+        4: ['crop', 'agricultural land'],
+        5: ['shrub and scrub', 'shrub', 'scrub'],
+        6: ['built-up area', 'urban area', 'developed impervious area'],
+        7: ['bare land', 'barren land', 'rock, sand, clay and soil'],
+        8: ['ice and snow'],
         # 9: ['Cloud', 'Cloud cover', 'Cloudy sky', 'Cloud layer', 'Cloud formation'],
     },
 
     'osm':{
         0: ['residential area'],
         1: ['arable land'],
-        2: ['forest'],
+        2: ['forest', 'tree'],
         3: ['industrial, commercial and transportation area'],
         4: ['artificial, non-argricultural vegetation'],
-        5: ['mine, dump and construction sites'],
+        5: ['mine, dump and construction site'],
         6: ['pasture'],
-        7: ['permanent crops'],
+        7: ['permanent crop'],
         8: ['water'],
-        9: ['bare land'],
+        9: ['bare land', 'barren land', 'rock, sand, clay and soil'],
         10:['shrub and herbaceous vegetation'],
         11:['inland wetland'],
         12:['coastal wetland'],
     },
+    # 'osm':{
+    #     0: ['residential area'],
+    #     1: ['arable land', 'herbaceous crop'],
+    #     2: ['forest', 'tree', 'wood'],
+    #     3: ['industrial, commercial and transportation area', 'road', 'transportation', 'industrial area', 'commercial area'],
+    #     4: ['artificial vegetation', 'non-argricultural vegetation'],
+    #     5: ['mine, dump and construction sites'],
+    #     6: ['pasture'],
+    #     7: ['permanent crop', 'woody crop'],
+    #     8: ['water'],
+    #     9: ['bare land', 'barren land'],
+    #     10:['shrub', 'scrub', 'grass'], #, 'grass except for pasture', 'herb except for pasture'], # 'shrub and herbaceous vegetation'],
+    #     11:['inland wetland'],
+    #     12:['coastal wetland'],
+    # },
 
     'vaihingen':{
         0: ['others except for grass, shrub, scrub, impervious area, car, building and tree'],
@@ -335,35 +300,113 @@ class_names = {
         5: ['tree'],  # tree
     },
 
-    'potsdam':{
-        0: ['barren land'], # ['others except for grass, shrub, scrub, impervious area, car, building and tree'],
-        1: ['grass, shrub and scrub'],  # low vegetation
-        2: ['impervious area including road'], # ['impervious area'],  # impervious surfaces
-        3: ['car'],  # car
-        4: ['building'],  # roof
-        5: ['tree'],  # tree
-    },
+    # 'potsdam':{
+    #     0: ['others except for grass, shrub, scrub, impervious area, car, building and tree', 'barren land', 'bare land', 'water'], # ['others except for grass, shrub, scrub, impervious area, car, building and tree'],
+    #     1: ['grass, shrub and scrub', 'herb', 'scrub', 'shrub', 'grass'],  # low vegetation
+    #     2: ['impervious area including road', 'road', 'impervious area'], # ['impervious area'],  # impervious surfaces
+    #     3: ['car'],  # car
+    #     4: ['building'],  # roof
+    #     5: ['tree', 'forest', 'wood'],  # tree
+    # },
 
     'nyc':{
-        0: ['tree'],
-        1: ['grass, shrub and scrub'],
-        2: ['bare land'],
+        0: ['tree', 'forest', 'wood'],
+        1: ['grass', 'herb', 'shrub', 'scrub'],
+        2: ['bare land', 'barren land', 'rock, sand, clay and soil'],
         3: ['water'],
         4: ['building'],
-        5: ['road except for railway'],
+        5: ['road except for railway', 'transportation except for railway'],
         6: ['impervious area except for road and building'],
         7: ['railway'],
     },
 
-    'loveda':{
-        0: ['others except for building, road, water, barren land, tree and agricultural land'],
-        1: ['building'],  # building
-        2: ['road'],  # road
-        3: ['water'],  # water
-        4: ['barren land'],  # bare land
-        5: ['tree'],  # tree
-        6: ['agricultural land'],  # agricultural land
+    # v1 - 0.43139307, 0.33439173, 0.05902506, 0.50567366, 0.46548849, 0.16560602, 0.3101188 , 0.0136799 , 0.28567209, 0.49804111
+    # 'nyc':{
+    #     0: ['tree', 'forest'],
+    #     1: ['grass, shrub and scrub', 'herb', 'grass', 'shrub', 'scrub'],
+    #     2: ['bare land', 'barren land', 'rock, sand, clay and soil'],
+    #     3: ['water'],
+    #     4: ['building'],
+    #     5: ['road except for railway', 'transportation except for railway'],
+    #     6: ['impervious area except for road and building'],
+    #     7: ['railway'],
+    # },
+
+    # v2 - [45.62, 25.37, 6.92, 39.91, 41.19, 20.68, 25.44, 2.71] [25.98, 47.5]
+    # 'nyc':{
+    #     0: ['tree', 'forest', 'wood'],
+    #     1: ['grass', 'herb'], # ['grass, shrub and scrub'],
+    #     2: ['bare land', 'barren land', 'rock, sand, clay and soil'],
+    #     3: ['water'],
+    #     4: ['building'],
+    #     5: ['road except for railway', 'transportation except for railway'],
+    #     6: ['impervious area except for road and building'],
+    #     7: ['railway'],
+    # },
+
+    'potsdam':{
+        0: ['barren land', 'bare land', 'water', 'crop', 'agricultural land', 'rock, sand, clay and soil', 'wetland', 'ice and snow'], #'others except for grass, shrub, scrub, impervious area, car, building and tree'],
+        1: ['grass, shrub and scrub', 'herb', 'scrub', 'shrub', 'grass'],  # low vegetation
+        2: ['road', 'transportation', 'impervious area except for building'], # ['impervious area'],  # impervious surfaces
+        3: ['car'],  # car
+        4: ['building'],  # roof
+        5: ['tree', 'forest'],  # tree
     },
+
+    # v1 - 0.0758773276e, 0.554983439e, 0.633068191e, 0.000103955133, 0.789058193e, 0.344188778, 0.399546647, 0.724730227e
+    # 'potsdam':{
+    #     0: ['ice and snow', 'barren land', 'bare land', 'water', 'crop', 'agricultural land', 'rock, sand, clay and soil'], # ['others except for grass, shrub, scrub, impervious area, car, building and tree'],
+    #     1: ['grass, shrub and scrub', 'herb', 'scrub', 'shrub', 'grass'],  # low vegetation
+    #     2: ['road', 'transportation', 'impervious area except for building'], # ['impervious area'],  # impervious surfaces
+    #     3: ['car'],  # car
+    #     4: ['building'],  # roof
+    #     5: ['tree', 'forest', 'wood'],  # tree
+    # },
+
+    # select v3
+    'loveda':{
+        0: ['impervious area except for road and building', 'grass', 'shrub', 'scrub'],
+        1: ['building'],  # building
+        2: ['road', 'transportation'],  # road
+        3: ['water'],  # water
+        4: ['barren land', 'bare land', 'soil', 'rock, sand, clay and soil'],  # bare land
+        5: ['tree', 'forest'],  # tree
+        6: ['agricultural land', 'crop', 'crop land'],  # agricultural land
+    },
+
+    # v1 - 0.3553743 , 0.56680558, 0.47481337, 0.46216657, 0.04878217, 0.29141114, 0.51697326, 0.38804663, 0.5844886 
+    #      0.36339748, 0.56276136, 0.45394944, 0.47532036, 0.03620452, 0.35580808, 0.50269756, 0.39287697, 0.5965044
+    # 'loveda':{
+    #     0: ['others except for building, road, water, barren land, tree and agricultural land', 'impervious area except for road and building', 'grass', 'shrub', 'scrub'],
+    #     1: ['building'],  # building
+    #     2: ['road', 'transportation'],  # road
+    #     3: ['water'],  # water
+    #     4: ['barren land', 'bare land', 'barren', 'bare'],  # bare land
+    #     5: ['tree', 'forest', 'wood'],  # tree
+    #     6: ['agricultural land', 'crop'],  # agricultural land
+    # },
+
+    # v2 - 0.28433398, 0.58067104, 0.4868177 , 0.45807776, 0.12002728, 0.28101899, 0.51454315, 0.3893557 , 0.55880743
+    # 'loveda':{
+    #     0: ['impervious area', 'grass', 'shrub', 'scrub'],
+    #     1: ['building'],  # building
+    #     2: ['road', 'transportation'],  # road
+    #     3: ['water'],  # water
+    #     4: ['barren land', 'bare land', 'soil', 'rock, sand, clay and soil'],  # bare land
+    #     5: ['tree', 'forest'],  # tree
+    #     6: ['agricultural land', 'crop', 'crop land'],  # agricultural land
+    # },
+
+    # v3 - 0.33333228, 0.56682832, 0.47487749, 0.46178705, 0.10318684, 0.29261969, 0.51742279, 0.39286492, 0.57350196
+    # 'loveda':{
+    #     0: ['impervious area except for road and building', 'grass', 'shrub', 'scrub'],
+    #     1: ['building'],  # building
+    #     2: ['road', 'transportation'],  # road
+    #     3: ['water'],  # water
+    #     4: ['barren land', 'bare land', 'soil', 'rock, sand, clay and soil'],  # bare land
+    #     5: ['tree', 'forest'],  # tree
+    #     6: ['agricultural land', 'crop', 'crop land'],  # agricultural land
+    # },
 }
 
 

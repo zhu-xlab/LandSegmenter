@@ -86,13 +86,19 @@ def main():
 
         # saving path
         args.pdir = args.ts_wpath.split('checkpoints')[0]
-        args.pdir = os.path.join(args.pdir, 'accuracy')
+        if args.test_use_multiple_prompts:
+            args.pdir = os.path.join(args.pdir, 'accuracy_mp')
+        else:
+            args.pdir = os.path.join(args.pdir, 'accuracy')
         if not os.path.exists(args.pdir): 
             try:
                 os.makedirs(args.pdir)
             except Exception as inner_e:
                 assert os.path.exists(args.pdir), f'Accuracy directory does not exist and cannot be created: {args.pdir}. Error: {inner_e}'
-        pred_fname = f'pred_EP{args.ts_wpath.split("epoch=")[-1].split("-")[0]}_{args.dataset_name}.npy'
+        if args.test_max_threshold>0:
+            pred_fname = f'pred_EP{args.ts_wpath.split("epoch=")[-1].split("-")[0]}_{args.dataset_name}_{args.test_max_threshold}_{args.test_bg_idx}.npy'
+        else:    
+            pred_fname = f'pred_EP{args.ts_wpath.split("epoch=")[-1].split("-")[0]}_{args.dataset_name}.npy'
         args.test_save_path = os.path.join(args.pdir, pred_fname)
         
 
