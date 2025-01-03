@@ -1,11 +1,12 @@
 import h5py
 import torch
 import wandb
+import datetime
 import numpy as np
 import torch.nn.functional as F
 from einops import rearrange
 from sam2.sam2_image_trainer import SAM2ImageTrainer as BaseTrainer
-from sam2.sam2_image_trainer import MASK_CODE
+from sam2.sam2_image_trainer import MASK_CODE, MULTI_MASK_KEYS
 
 # from segmentation_models_pytorch.losses import DiceLoss, FocalLoss
 from kornia.losses import (                   # type: ignore
@@ -14,7 +15,7 @@ from kornia.losses import (                   # type: ignore
 )
 
 
-class SAM2ImageTrainerAuxUnc(BaseTrainer):
+class SAM2ImageTrainerAuxUncScaleW(BaseTrainer):
     def __init__(self, 
                  args,
                  ):
@@ -30,14 +31,17 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
         self.unc_lambda = args.weak_unc_lambda
         self.no_weak_input = args.no_weak_input
         self.weak_detach = args.weak_detach
-        # logvar smooth layer
-        # v1: no_grads=True, fixsmt, but debug-tag=adaptsmt
-        # v2: no_grads=False, realadaptsmt
-        # self.smooth_logvar = get_logvar_smooth_layer(kernel_size=3, n_depth=2, no_grads=False)
-        # self.dropout_rate = args.dropout_rate
-        # if self.dropout_rate>0: 
-        #     self.dropout = torch.nn.Dropout(p=self.dropout_rate)
-        #     self.dropout_n = args.dropout_n
+        # for rescale class weights
+        self.weight_pos_mean = args.weight_pos_mean
+        self.weight_neg_mean = args.weight_neg_mean
+        self.cls_w_means = {}
+        self.cls_w_sum_update, self.cls_n_samples_update = {}, {}
+        self.cls_keys = []
+        for d in args.dataset_name:
+            if d in MULTI_MASK_KEYS:
+                self.cls_keys += MULTI_MASK_KEYS[d]
+            else:
+                self.cls_keys.append(d)
         # test settings
         self.test_only = args.test_only
         if self.test_only:
@@ -53,8 +57,54 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
     
     def on_train_epoch_start(self):
         super().on_train_epoch_start()
+        t1 = datetime.datetime.now().replace(microsecond=0)
         self.weak_weight = self.weak_weight_final*self._get_weak_loss_weight(self.current_epoch)
-        
+        if len(self.cls_n_samples_update)>0:
+            if len(self.cls_keys) != len(self.cls_n_samples_update):
+                self.cls_keys = [k for k in self.cls_keys if k in self.cls_n_samples_update]
+            # # if self.trainer.global_rank==0:
+            # #     print(f"EP{self.current_epoch}|n_sample={self.cls_n_samples_update}")
+            # for k in self.cls_keys:
+            #     cls_w_means_all = self._gather_data_across_gpus(self.cls_w_means_update[k])
+            #     cls_n_samples_all = self._gather_data_across_gpus(self.cls_n_samples_update[k])
+            #     cls_w_means_all = torch.stack(cls_w_means_all, dim=0)
+            #     cls_n_samples_all = torch.stack(cls_n_samples_all, dim=0)
+            #     cls_w_means = (cls_w_means_all*cls_n_samples_all).sum(dim=0)/cls_n_samples_all.sum(dim=0)
+            #     self.cls_w_means[k] = cls_w_means.detach()
+            # if self.trainer.global_rank==0:
+            #     print(f"cls_n_samples={self.cls_n_samples_update}")
+            # self.cls_w_means_update.clear()
+            # self.cls_n_samples_update.clear()
+            # t2 = datetime.datetime.now().replace(microsecond=0)
+            # if self.current_epoch<5 and self.trainer.global_rank==0:
+            #     print(f"Train_start-{t2-t1}-{self.trainer.global_rank}: cls_w_means={self.cls_w_means}")
+            
+            # with torch.no_grad():   
+            #     for k in self.cls_keys:
+            #         cls_w_sum_all = self._gather_data_across_gpus(self.cls_w_sum_update[k])
+            #         cls_n_samples_all = self._gather_data_across_gpus(self.cls_n_samples_update[k])
+            #         if self.trainer.global_rank==0:
+            #             print(f"EP{self.current_epoch}|cls_n_samples_all={cls_n_samples_all}")
+            #             print(f"EP{self.current_epoch}|cls_w_means_all={cls_w_means_all}")
+            #         cls_w_sum_all = torch.cat(cls_w_sum_all, dim=0)
+            #         cls_n_samples_all = torch.cat(cls_n_samples_all, dim=0)
+            #         cls_w_means = cls_w_sum_all.sum(dim=0) / cls_n_samples_all.sum(dim=0)
+            #         self.cls_w_means[k] = cls_w_means.detach()
+            #         if self.trainer.global_rank==0:
+            #             print(f"k={k}|cls_n_samples={self.cls_n_samples_update[k]}")  
+            # self.cls_w_means_update.clear()
+            # self.cls_n_samples_update.clear()
+            for k in self.cls_keys:
+                cls_w_sum = self.cls_w_sum_update[k]
+                cls_n_samples = self.cls_n_samples_update[k]
+                torch.distributed.all_reduce(cls_w_sum, op=torch.distributed.ReduceOp.SUM)
+                torch.distributed.all_reduce(cls_n_samples, op=torch.distributed.ReduceOp.SUM)
+                self.cls_sums[k] = cls_w_sum / cls_n_samples
+                print(k, self.cls_sums[k], cls_n_samples)
+            self.cls_w_sum_update.clear()
+            self.cls_n_samples_update.clear()
+
+
     # ------ Training ------ #
     def training_step(self, batch, batch_idx):
         log_insides_func = False
@@ -113,9 +163,24 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
             
             # part 2: weak label loss with estimated uncertainty from aux decoder
             y_valid = (y!=MASK_CODE).unsqueeze(1).expand_as(masks)
-            if if_weak_lbl and self.weak_weight>0:
+            if if_weak_lbl: # if_weak_lbl and self.weak_weight>0:
                 weights_cls = torch.exp(-hetero_uncs)
-                weights_avg = weights_cls.mean(dim=1)
+                weights_cls = torch.nan_to_num(weights_cls, nan=0.0, posinf=0.0, neginf=0.0)
+                y_onehot = self._update_weight_cls_stats(weights_cls, y, name_key)
+                
+                # y_onehot = F.one_hot(y, num_classes=n_class)
+                # y_onehot[y==MASK_CODE,:] = 0
+                # y_onehot = y_onehot.permute(0, 3, 1, 2)
+
+                if len(self.cls_w_means)>0:
+                    weights_cls = self._rescale_weight_cls(weights_cls, y_onehot, name_key)
+                
+                # weights_avg = weights_cls.mean(dim=1)
+                # weights_avg = torch.zeros_like(y, dtype=torch.float32, device=x.device)
+                # for c in range(n_class):
+                #     weights_avg[y==c] = weights_cls[:,c][y==c]
+                weights_avg = (weights_cls*y_onehot).sum(dim=1)
+                
                 weak_loss_ = self._calculate_loss(n_class, y, y_exist, ious, precises, 
                                                   masks, exist_predictions, iou_predictions, precise_predictions,
                                                   class_weights=class_weights, weights_list=[weights_cls, weights_avg],
@@ -299,122 +364,67 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
         hetero_uncs = F.relu(hetero_uncs_)
         return hetero_uncs
     
+    @torch.no_grad()
+    def _update_weight_cls_stats(self, weights_cls, y, name_key):
+        weights_cls = weights_cls.detach()
+        n_class = weights_cls.shape[1]
+        y_onehot = F.one_hot(y, num_classes=n_class).permute(0, 3, 1, 2) * (y!=MASK_CODE)[:,None]
+        y_onehot_neg = (1-y_onehot) * (y!=MASK_CODE)[:,None]
+        if name_key not in self.cls_w_sum_update:
+            self.cls_w_sum_update[name_key] = torch.zeros((2, n_class), requires_grad=False, device=self.device)     # 0: pos, 1: neg
+            self.cls_n_samples_update[name_key] = torch.zeros((2, n_class), requires_grad=False, device=self.device)
+            # self.cls_w_means_update[name_key] = [0.]*n_class
+            # self.cls_n_samples_update[name_key] = [0.]*n_class
+        self.cls_n_samples_update[name_key][0] = self.cls_n_samples_update[name_key][0] + y_onehot.sum(dim=(0,2,3))
+        self.cls_n_samples_update[name_key][1] = self.cls_n_samples_update[name_key][1] + y_onehot_neg.sum(dim=(0,2,3))
+        self.cls_w_sum_update[name_key][0] = self.cls_w_sum_update[name_key][0] + (weights_cls*y_onehot).sum(dim=(0,2,3))
+        self.cls_w_sum_update[name_key][1] = self.cls_w_sum_update[name_key][1] + (weights_cls*y_onehot_neg).sum(dim=(0,2,3))
 
-    def _calculate_loss(self, n_classes, y, y_exist=None, ious=None, precises=None,
-                        mask_predictions=None, exist_predictions=None, 
-                        iou_predictions=None, precise_predictions=None,
-                        class_weights=None, weights_list=None,
-                        from_aux_decoder=False, log=True):
-        aux_tag = '_aux' if from_aux_decoder else ''
+        return y_onehot 
 
-        # calculate losses 
-        loss = torch.tensor(0.0, device=self.device)
-        # binary loss
-        mask = (y!=MASK_CODE) # no data mask
-        mask = mask.unsqueeze(1).expand_as(mask_predictions)
-        y_one_hot = F.one_hot(y.clamp(0, n_classes - 1), num_classes=n_classes).permute(0, 3, 1, 2)  # Reshape to [5, 3, 4, 4]
-        y_one_hot = y_one_hot * mask
-        y_one_hot_wnodata = y_one_hot * mask + (~mask) * MASK_CODE
-        # get weights from hete_uncertainty
-        if weights_list is not None:  
-            weights = mask.float()*weights_list[0]
-            pixel_weights_mean = mask.float()[:,0]*weights_list[1]
-        else:
-            weights = None
+        # for c in range(n_class):
+        #     w = weights_cls[:,c]
+        #     n_pos = (y==c).sum()
+        #     n_neg = ((y!=c)*(y!=MASK_CODE)).sum()
+        #     w_sum_pos = w[y==c].sum()
+        #     w_sum_neg = w[(y!=c)*(y!=MASK_CODE)].sum()
+        #     if n_pos>0:
+        #         self.cls_w_sum_update[name_key][0,c] = self.cls_w_sum_update[name_key][0,c] + w_sum_pos
+        #             # (self.cls_w_means_update[name_key][0,c]*self.cls_n_samples_update[name_key][0,c] + w_mean_pos*n_pos)/(self.cls_n_samples_update[name_key][0,c]+n_pos)
+        #         self.cls_n_samples_update[name_key][0,c] = self.cls_n_samples_update[name_key][0,c] + n_pos
+        #     if n_neg>0:
+        #         self.cls_w_sum_update[name_key][1,c] = self.cls_w_sum_update[name_key][1,c] + w_sum_neg
+        #         # self.cls_w_means_update[name_key][1,c] = \
+        #         #     (self.cls_w_means_update[name_key][1,c]*self.cls_n_samples_update[name_key][1,c] + w_mean_neg*n_neg)/(self.cls_n_samples_update[name_key][1,c]+n_neg)
+        #         self.cls_n_samples_update[name_key][1,c] = self.cls_n_samples_update[name_key][1,c] + n_neg
+    
 
-            
-        for w, k in zip([self.wdice, self.wfocal, self.wce], ['dice', 'focal', 'bce']):
-            if w>0:
-                if k=='bce':
-                    reduce = 'mean' if weights is None else 'none'
-                    loss_ = w*F.binary_cross_entropy_with_logits(
-                        mask_predictions, y_one_hot.float(), 
-                        weight=mask.float(), 
-                        pos_weight=class_weights[:, None, None] if class_weights is not None else None, 
-                        reduction=reduce,
-                    )
-                    if reduce == 'none':
-                        loss_ = (loss_*weights)[mask].mean()
-                elif k=='dice':
-                    if weights is None:
-                        loss_ = w*dice_loss(
-                            mask_predictions, y, 
-                            average='macro', weight=class_weights,
-                            ignore_index=MASK_CODE
-                        )
-                    else: 
-                        loss_ = w*self.SoftBDLoss(mask_predictions, y_one_hot_wnodata, 
-                                                  weights=weights,
-                                                  class_weights=class_weights,)
-                    loss_ = loss_ * n_classes
-                elif k=='focal':
-                    reduce = 'mean' if weights is None else 'none'
-                    loss_ = w*binary_focal_loss_with_logits(
-                        mask_predictions, y_one_hot_wnodata,
-                        reduction=reduce, pos_weight=class_weights,
-                        ignore_index=MASK_CODE,
-                    )
-                    if reduce=='none':
-                        loss_ = (loss_*weights)[mask].mean()  # (loss_.sum(axis=(0,2,3))/n_per_class).sum()
+    def _rescale_weight_cls(self, weights_cls, y_onehot, name_key):
+        rescale_pos = y_onehot * (self.weight_pos_mean-self.cls_w_means[name_key][0,:][None,:,None,None])
+        rescale_neg = (1-y_onehot) * (self.weight_neg_mean-self.cls_w_means[name_key][1,:][None,:,None,None])
+        rescale_matrix = rescale_pos + rescale_neg
+        weights_cls = torch.clip(weights_cls + rescale_matrix, 0, 1)
+        return weights_cls
+        # rescale_matrix = torch.zeros_like(weights_cls, device=y_onehot.device, requires_grad=False)
+        # for c in range(n_class):
+        #     rescale_matrix[:,c] = torch.where(y==c, 
+        #                                       self.weight_pos_mean-self.cls_w_means[name_key][0,c],
+        #                                       self.weight_neg_mean-self.cls_w_means[name_key][1,c])
+        # weights_cls = torch.clip(weights_cls + rescale_matrix, 0, 1)
+        # return weights_cls
 
-                loss = loss+loss_
 
-        # multi-class loss
-        if self.use_multiclass_loss:
-            if weights is None:
-                for L, w in zip([self.DLoss, self.FLoss, self.CELoss], [self.wdice, self.wfocal, self.wce]):
-                    if w>0:
-                        loss_ = w*L(mask_predictions, y.clone())  # otherwise encounter the error: RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.LongTensor [6, 256, 256]] is at version 2; expected version 0 instead.
-                        loss = loss+loss_
-                    else:
-                        continue
-            else:
-                # pixel_weights_mean = weights.mean(axis=1)
-                for w, k in zip([self.wdice, self.wfocal, self.wce], ['dice', 'focal', 'ce']):
-                    if k == 'ce':
-                        loss_ = F.cross_entropy(mask_predictions, y, ignore_index=MASK_CODE, reduction='none')
-                        loss_ = w*(loss_*pixel_weights_mean)[mask[:,0]].mean() # loss_: [batch_size, h, w]
-                    elif k == 'dice':
-                        loss_ = w*self.SoftDLoss(mask_predictions, y, weights=pixel_weights_mean)
-                    elif k == 'focal':
-                        loss_ = focal_loss(mask_predictions, y, reduction='none', ignore_index=MASK_CODE, alpha=0.25)
-                        loss_ = loss_.mean(axis=(1))   # loss_: [batch_size, c, h, w]
-                        loss_ = w*(loss_*pixel_weights_mean)[mask[:,0]].mean()
-        if log: self.log(f'tr{aux_tag}_loss_mask', loss, on_epoch=True, on_step=False, sync_dist=True)
-        
-        # existance loss
-        if y_exist is not None:
-            loss_exist_matrix = self.BCELoss_noreduce(exist_predictions, y_exist)
-            # calculate the proportion of labeled pixels to serve as the weights
-            y_proportions = ((y!=MASK_CODE).sum(axis=(1,2))/(y.shape[1]*y.shape[2]))[:,None]
-            y_proportions = y_proportions.repeat(1, n_classes)
-            w_exist = torch.max(y_proportions, y_exist)
-            # weighted existance loss according to the reliability
-            loss_exist = (w_exist*loss_exist_matrix).sum()/loss_exist_matrix.numel()
-            loss_exist = loss_exist * n_classes
-            if log: self.log(f'tr{aux_tag}_loss_exist', loss_exist, on_epoch=True, on_step=False, sync_dist=True)
-        else:
-            loss_exist = torch.tensor(0.0, device=self.device)
-
-        # accuracy losses
-        if ious is not None:
-            loss_iou_matrix = self.L1Loss(iou_predictions, ious)
-            # calculate weighted iou loss
-            # weighting strategy: considering 1. the reliability of the existance prediction, 2. the reliability of the iou prediction
-            loss_iou = self._calculate_acc_loss(loss_iou_matrix, y_proportions, y_exist)
-        else:
-            loss_iou = torch.tensor(0.0, device=self.device)
-        if precises is not None:
-            loss_precise_matrix = self.L1Loss(precise_predictions, precises)
-            loss_precise = self._calculate_acc_loss(loss_precise_matrix, y_proportions, y_exist)
-        else:
-            loss_precise = torch.tensor(0.0, device=self.device)
-
-        # final loss
-        loss = loss \
-            + loss_iou*n_classes \
-            + loss_precise*n_classes \
-            + loss_exist
-        if log: self.log(f'tr{aux_tag}_loss', loss, on_epoch=True, on_step=False, sync_dist=True)
-
-        return loss
+    # def _gather_data_across_gpus(self, local_data) -> list[torch.Tensor]:
+    #     gathered_data = [None] * self.trainer.world_size  # Placeholder for data from each process
+    #     torch.distributed.all_gather_object(gathered_data, local_data)  # Gather data from all processes
+    #     # move all the tensors to the current device
+    #     # current_device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    #     # gathered_data = [data.to(current_device) for data in gathered_data]
+    #     gathered_data = [data.to(local_data.device) for data in gathered_data]
+    #     return gathered_data # type: ignore
+    
+    def _gather_data_across_gpus(self, local_data: torch.Tensor) -> torch.Tensor:
+        gathered_data = [torch.zeros_like(local_data) for _ in range(self.trainer.world_size)]
+        torch.distributed.all_gather(gathered_data, local_data)
+        gathered_data = torch.stack(gathered_data, dim=0)
+        return gathered_data

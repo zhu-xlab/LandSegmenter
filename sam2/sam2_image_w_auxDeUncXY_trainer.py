@@ -112,7 +112,11 @@ class SAM2ImageTrainerAuxUnc(BaseTrainer):
             y_valid = (y!=MASK_CODE).unsqueeze(1).expand_as(masks)
             if if_weak_lbl and self.weak_weight>0:
                 weights_cls = torch.exp(-hetero_uncs)
-                weights_avg = weights_cls.mean(dim=1)
+                weights_cls = torch.nan_to_num(weights_cls, nan=0.0, posinf=0.0, neginf=0.0)
+                # get one-hot labels
+                y_onehot = F.one_hot(y, num_classes=n_class).permute(0, 3, 1, 2) * (y!=MASK_CODE)[:,None]
+                # weights_avg = weights_cls.mean(dim=1)
+                weights_avg = (weights_cls*y_onehot).sum(dim=1)
                 weak_loss_ = self._calculate_loss(n_class, y, y_exist, ious, precises, 
                                                   masks, exist_predictions, iou_predictions, precise_predictions,
                                                   class_weights=class_weights, weights_list=[weights_cls, weights_avg],
