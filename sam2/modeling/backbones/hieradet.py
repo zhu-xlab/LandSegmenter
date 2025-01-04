@@ -211,6 +211,7 @@ class Hiera(nn.Module):
         dofa_name: str = 'vit_base_patch16_224',
         dofa_ckpt_path: str = None,
         dofa_unfix_weights: bool = False,
+        dofa_wo_rgb: bool = False,  # whether to exclude RGB channels in dofa feature extraction
     ):
         super().__init__()
 
@@ -271,6 +272,7 @@ class Hiera(nn.Module):
                                                     self.handcrafted_tune, self.embedding_tune, 
                                                     self.spectralfeat_tune, dofa_name, dofa_ckpt_path, dofa_unfix_weights,
                                                     )
+            self.wo_rgb_in_dofa = dofa_wo_rgb
 
         cur_stage = 1
         self.blocks = nn.ModuleList()
@@ -358,9 +360,18 @@ class Hiera(nn.Module):
 
         # dofa spectral features
         if self.spectralfeat_tune:
-            if inp.shape[-1] != self.dofa_img_size:
-                inp = F.interpolate(inp, size=(self.dofa_img_size, self.dofa_img_size), mode='bilinear', align_corners=False).contiguous()
-            spectral_feats = self.prompt_generator.init_spectral_feature(inp, wave_list)
+            if self.wo_rgb_in_dofa:
+                if inp.shape[1] > 3:
+                    inp_dofa = inp[:, 3:]
+                    if inp_dofa.shape[-1] != self.dofa_img_size:
+                        inp_dofa = F.interpolate(inp_dofa, size=(self.dofa_img_size, self.dofa_img_size), mode='bilinear', align_corners=False).contiguous()
+                    spectral_feats = self.prompt_generator.init_spectral_feature(inp_dofa, wave_list[3:])
+                else:
+                    spectral_feats = 0
+            else:
+                if inp.shape[-1] != self.dofa_img_size:
+                    inp = F.interpolate(inp, size=(self.dofa_img_size, self.dofa_img_size), mode='bilinear', align_corners=False).contiguous()
+                spectral_feats = self.prompt_generator.init_spectral_feature(inp, wave_list)
 
         outputs = []
         cur_stage = 0
@@ -368,9 +379,10 @@ class Hiera(nn.Module):
             if i in self.adaptor_stage_starts:
                 cur_stage += 1
                 if str(cur_stage) in self.tuning_stage:
+                    spectral_feat_ = None if not self.spectralfeat_tune else 0 if spectral_feats==0 else spectral_feats[str(cur_stage)]
                     prompts = self.prompt_generator.init_prompt(
                         x, handcraft_feats[str(cur_stage)], cur_stage,
-                        spectral_feature=spectral_feats[str(cur_stage)] if self.spectralfeat_tune else None,
+                        spectral_feature=spectral_feat_,
                     )   # 0: handcrafted, 1: reprojected embeddings, 2: spectral features
                 cur_depth = 0
             # integrate adaptor prompt features

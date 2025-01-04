@@ -155,6 +155,7 @@ def get_common_args(parser):
     parser.add_argument('--mute-adaptor', action='store_true', default=False, help='Whether to use adaptor or not')
     parser.add_argument('--dofa-type', type=str, default=None, choices=['vit_base_patch16', 'vit_large_patch16', 'None'], help='Type of DoFA model to use. Default is None (not using dofa).')
     parser.add_argument('--dofa-ckpt-path', type=str, default=None, help='Path to the checkpoint file (dofa)')
+    parser.add_argument('--dofa-wo-rgb', action='store_true', default=False, help='Whether to use dofa to extract features from rgb or not')
     parser.add_argument('--dofa-unfix-weights', action='store_true', default=False, help='Whether to unfix dofa weights or not')
     parser.add_argument('--dofa-lr-scale', type=float, default=1.0, help='Learning rate scale for DOFA if dofa-unfix-weights is True')
     parser.add_argument('--resume', type=str, default=False, help='Path of the checkpoint file from which the training is resumed.')
@@ -211,7 +212,9 @@ def set_log_files(args, w_unc=False):
                 if args.dofa_lr_scale!=1.0:
                     dofa_active += f'x{args.dofa_lr_scale}'  
             else:
-                dofa_active = ''                   
+                dofa_active = ''    
+            if args.dofa_wo_rgb:
+                dofa_active += 'woRGB'               
             args.gname = f'FT_dofa{args.dofa_type[4]}{dofa_active}{aux}'
     else:
         args.gname = f'FT{aux}_woAd'

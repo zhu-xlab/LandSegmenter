@@ -262,6 +262,8 @@ class PromptGenerator(nn.Module):
                 setattr(self, f'embedding_pam_{i+1}', embedding_pam)
                
         if self.spectralfeat_tune:
+            # list used to record the final dimension of each stage
+            self.final_ds = []
             # build dofa
             assert os.path.exists(dofa_ckpt_path), f"DOFA checkpoint path {dofa_ckpt_path} does not exist!"
             self.dofa_patch_size = 16
@@ -272,6 +274,7 @@ class PromptGenerator(nn.Module):
             # build spectral feature generators
             for i in range(len(self.stages)):
                 final_d = self.embed_dims[i] // self.scale_factor
+                self.final_ds.append(final_d)
                 r = math.pow(self.dofa.embed_dim/final_d,1/3)
                 spectralfeat_generator = nn.Sequential(
                     nn.Linear(self.dofa.embed_dim, int(final_d*r**2)),
@@ -470,11 +473,14 @@ class PromptGenerator(nn.Module):
     
         if self.spectralfeat_tune:
             assert spectral_feature is not None, "Spectral feature is None while spectralfeat_tune=True!"
-            # spectralfeat_generator = self.spectralfeat_generators[str(block_num)]
-            spectralfeat_generator = getattr(self, f'spectralfeat_generator_{block_num}')
-            spectral_feature = spectralfeat_generator(spectral_feature)
-            spectral_feature = F.interpolate(spectral_feature.permute(0, 3, 1, 2), size=(H,W), mode='bilinear', align_corners=False)
-            spectral_feature = spectral_feature.permute(0, 2, 3, 1)
+            if isinstance(spectral_feature, torch.Tensor):
+                # spectralfeat_generator = self.spectralfeat_generators[str(block_num)]
+                spectralfeat_generator = getattr(self, f'spectralfeat_generator_{block_num}')
+                spectral_feature = spectralfeat_generator(spectral_feature)
+                spectral_feature = F.interpolate(spectral_feature.permute(0, 3, 1, 2), size=(H,W), mode='bilinear', align_corners=False)
+                spectral_feature = spectral_feature.permute(0, 2, 3, 1)
+            else:
+                spectral_feature = torch.zeros((B, H, W, self.final_ds[block_num-1])).to(embedding_feature.device)
             return handcrafted_feature, embedding_feature, spectral_feature
         else:
             return handcrafted_feature, embedding_feature

@@ -76,6 +76,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         hydra_overrides_extra = [f'++model.image_encoder.trunk.spectralfeat_tune={use_dofa}',
                                  f'++model.image_encoder.trunk.dofa_name={args.dofa_type}',
                                  f'++model.image_encoder.trunk.dofa_ckpt_path={args.dofa_ckpt_path}',
+                                 f'++model.image_encoder.trunk.dofa_wo_rgb={args.dofa_wo_rgb}',
                                  f'++model.use_auxiliary_decoder={args.use_aux_decoder}',]
         if args.mute_adaptor: hydra_overrides_extra += ['++model.image_encoder.trunk.adaptor=None']
         if args.dofa_unfix_weights: 
