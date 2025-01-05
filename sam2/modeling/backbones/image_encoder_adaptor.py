@@ -479,14 +479,19 @@ class PromptGenerator(nn.Module):
                 spectral_feature = spectralfeat_generator(spectral_feature)
                 spectral_feature = F.interpolate(spectral_feature.permute(0, 3, 1, 2), size=(H,W), mode='bilinear', align_corners=False)
                 spectral_feature = spectral_feature.permute(0, 2, 3, 1)
-            else:
-                spectral_feature = torch.zeros((B, H, W, self.final_ds[block_num-1])).to(embedding_feature.device)
+            # else:
+            #     spectral_feature = torch.zeros((B, H, W, self.final_ds[block_num-1])).to(embedding_feature.device)
             return handcrafted_feature, embedding_feature, spectral_feature
         else:
             return handcrafted_feature, embedding_feature
 
     def get_prompt(self, x, prompt, block_num, depth_num):
-        concat_prompt = torch.stack(prompt, dim=-1).sum(dim=-1)
+        if isinstance(prompt[-1], torch.Tensor):
+            concat_prompt = torch.stack(prompt, dim=-1).sum(dim=-1)
+            use_spectral = True
+        else:
+            concat_prompt = torch.stack(prompt[:-1], dim=-1).sum(dim=-1)
+            use_spectral = False
         feat = 0
         # B, H, W =  prompt[1].shape[0],  prompt[1].shape[1],  prompt[1].shape[2]
         if self.handcrafted_tune:
@@ -508,14 +513,15 @@ class PromptGenerator(nn.Module):
             epatt = embedding_pam(efeat)
             feat += epatt*efeat
         if self.spectralfeat_tune:
-            # feature attention
-            spectralfeat_attention = getattr(self, f'spectralfeat_attention_{block_num}')
-            satt = spectralfeat_attention(prompt[2], concat_prompt)
-            sfeat = satt*prompt[2]
-            # position/spatial attention
-            spectralfeat_pam = getattr(self, f'spectralfeat_pam_{block_num}')
-            spatt = spectralfeat_pam(sfeat)
-            feat += spatt*sfeat
+            if use_spectral:
+                # feature attention
+                spectralfeat_attention = getattr(self, f'spectralfeat_attention_{block_num}')
+                satt = spectralfeat_attention(prompt[2], concat_prompt)
+                sfeat = satt*prompt[2]
+                # position/spatial attention
+                spectralfeat_pam = getattr(self, f'spectralfeat_pam_{block_num}')
+                spatt = spectralfeat_pam(sfeat)
+                feat += spatt*sfeat
 
         if self.adaptor == 'adaptor':
             lightweight_mlp = getattr(self, f'lightweight_mlp_{block_num}_{depth_num}')

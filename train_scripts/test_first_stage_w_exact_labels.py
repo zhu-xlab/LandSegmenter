@@ -101,6 +101,7 @@ def main():
 
         ###### 3 - define the model ######
         torch.set_float32_matmul_precision('high')
+        dataset_name = args.dataset_name
         if args.use_sep_aux_de_weak:
             args.dataset_name = ['dynamicearthnet', 'openearthmap', 'sbtn', 'worldcover', 'iran', 'ghsl', 'nlcd', 'usfs']
         # build model
@@ -128,7 +129,7 @@ def main():
         # test the model
         trainer.test(model=model, ckpt_path=args.ts_wpath, dataloaders=test_loader, verbose=True)
         t2 = datetime.datetime.now().replace(microsecond=0)
-        print(f'Testing for {args.dataset_name} is finished| time:{t2-t1}!\n')
+        print(f'Testing for {dataset_name} is finished| time:{t2-t1}!\n')
         torch.cuda.empty_cache()
 
     t3 = datetime.datetime.now().replace(microsecond=0)
