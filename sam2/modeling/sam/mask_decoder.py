@@ -223,8 +223,12 @@ class MaskDecoder(nn.Module):
             assert image_embeddings.shape[0] == tokens.shape[0]  # check batch size
             src = image_embeddings
         
-        # Add noise mask info for quality prediction
-        src = src + noise_mask_embeddings
+        # Add noise mask info for quality prediction  (option 1/2 changes are also in transformer.py)
+        # ------------------------------------------------------------------------------------------------
+        # ------ option 1: adding noise_mask_embeddings to image embeddings without new key tpyes
+        # src = src + noise_mask_embeddings
+        # ------ option 2: regard noise_mask_embeddings as another key type, so no addtion applied here
+        # ------------------------------------------------------------------------------------------------
         # src = src + dense_prompt_embeddings
         # assert (
         #     image_pe.size(0) == 1
@@ -233,7 +237,12 @@ class MaskDecoder(nn.Module):
         b, c, h, w = src.shape
 
         # Run the transformer
-        hs, src = self.transformer(src, tokens) # (src, pos_src, tokens)
+        # ------------------------------------------------------------------------------------------------
+        # ------ option 1: adding noise_mask_embeddings to image embeddings without new key tpyes
+        # hs, src = self.transformer(src, tokens) # (src, pos_src, tokens)
+        # ------ option 2: regard noise_mask_embeddings as another key type
+        hs, src = self.transformer(src, noise_mask_embeddings, tokens)
+        # ------------------------------------------------------------------------------------------------
         iou_token_out = hs[:, s, :]
         mask_tokens_out = hs[:, s + 1 : (s + 1 + self.num_mask_tokens), :]
 
