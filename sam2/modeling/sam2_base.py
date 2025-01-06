@@ -36,6 +36,7 @@ class SAM2Base(torch.nn.Module):
         noise_mask_in_chans=16,
         sam_mask_decoder_extra_args=None,
         compile_image_encoder: bool = False,
+        decoder_expand_dim: bool = False,
     ):
         super().__init__()
 
@@ -57,7 +58,7 @@ class SAM2Base(torch.nn.Module):
         self.backbone_stride = backbone_stride
         self.sam_mask_decoder_extra_args = sam_mask_decoder_extra_args
         
-        self._build_sam_heads()
+        self._build_sam_heads(decoder_expand_dim)
         
         # Model compilation
         if compile_image_encoder:
@@ -85,7 +86,7 @@ class SAM2Base(torch.nn.Module):
         )
 
 
-    def _build_sam_heads(self):
+    def _build_sam_heads(self, decoder_expand_dim):
         """Build SAM-style prompt encoder and mask decoder."""
         self.sam_prompt_embed_dim = self.hidden_dim
         self.sam_image_embedding_size = self.image_size // self.backbone_stride
@@ -114,6 +115,7 @@ class SAM2Base(torch.nn.Module):
             iou_head_hidden_dim=256,
             use_high_res_features=self.use_high_res_features_in_sam,
             iou_prediction_use_sigmoid=self.iou_prediction_use_sigmoid,
+            expand_dim=decoder_expand_dim,
             **(self.sam_mask_decoder_extra_args or {}),
         )
         # for noise mask quality prediction
@@ -143,6 +145,7 @@ class SAM2Base(torch.nn.Module):
                 iou_head_hidden_dim=256,
                 use_high_res_features=self.use_high_res_features_in_sam,
                 iou_prediction_use_sigmoid=self.iou_prediction_use_sigmoid,
+                expand_dim=decoder_expand_dim,
                 **(self.sam_mask_decoder_extra_args or {}),
             )
             # for noise mask quality prediction
@@ -171,6 +174,7 @@ class SAM2Base(torch.nn.Module):
                     iou_head_hidden_dim=256,
                     use_high_res_features=self.use_high_res_features_in_sam,
                     iou_prediction_use_sigmoid=self.iou_prediction_use_sigmoid,
+                    expand_dim=decoder_expand_dim,
                     **(self.sam_mask_decoder_extra_args or {}),
                 )
                 setattr(self, f'sam_mask_decoder_aux_{i}', sam_mask_decoder_aux)

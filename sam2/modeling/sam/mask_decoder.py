@@ -54,32 +54,62 @@ class MaskDecoder(nn.Module):
         self.num_mask_tokens = num_multimask_outputs + 1
         self.mask_tokens = nn.Embedding(self.num_mask_tokens, transformer_dim)
 
-        self.output_upscaling = nn.Sequential(
-            nn.ConvTranspose2d(
-                transformer_dim, transformer_dim // 4, kernel_size=2, stride=2
-            ),
-            LayerNorm2d(transformer_dim // 4),
-            activation(),
-            nn.ConvTranspose2d(
-                transformer_dim // 4, transformer_dim // 8, kernel_size=2, stride=2
-            ),
-            activation(),
-        )
-        self.use_high_res_features = use_high_res_features
-        if use_high_res_features:
-            self.conv_s0 = nn.Conv2d(
-                transformer_dim, transformer_dim // 8, kernel_size=1, stride=1
+        if expand_dim:
+            # # # # # # expanded feature dimensions
+            self.output_upscaling = nn.Sequential(
+                nn.ConvTranspose2d(
+                    transformer_dim, transformer_dim, kernel_size=2, stride=2
+                ),
+                LayerNorm2d(transformer_dim),
+                activation(),
+                nn.ConvTranspose2d(
+                    transformer_dim, transformer_dim*2, kernel_size=2, stride=2
+                ),
+                activation(),
             )
-            self.conv_s1 = nn.Conv2d(
-                transformer_dim, transformer_dim // 4, kernel_size=1, stride=1
-            )
+            self.use_high_res_features = use_high_res_features
+            if use_high_res_features:
+                self.conv_s0 = nn.Conv2d(
+                    transformer_dim, transformer_dim*2, kernel_size=1, stride=1
+                )
+                self.conv_s1 = nn.Conv2d(
+                    transformer_dim, transformer_dim, kernel_size=1, stride=1
+                )
 
-        self.output_hypernetworks_mlps = nn.ModuleList(
-            [
-                MLP(transformer_dim, transformer_dim, transformer_dim // 8, 3)
-                for i in range(self.num_mask_tokens)
-            ]
-        )
+            self.output_hypernetworks_mlps = nn.ModuleList(
+                [
+                    MLP(transformer_dim, transformer_dim, transformer_dim*2, 3)
+                    for i in range(self.num_mask_tokens)
+                ]
+            )
+        else:
+            # # # # # original feature dimensions
+            self.output_upscaling = nn.Sequential(
+                nn.ConvTranspose2d(
+                    transformer_dim, transformer_dim // 4, kernel_size=2, stride=2
+                ),
+                LayerNorm2d(transformer_dim // 4),
+                activation(),
+                nn.ConvTranspose2d(
+                    transformer_dim // 4, transformer_dim // 8, kernel_size=2, stride=2
+                ),
+                activation(),
+            )
+            self.use_high_res_features = use_high_res_features
+            if use_high_res_features:
+                self.conv_s0 = nn.Conv2d(
+                    transformer_dim, transformer_dim // 8, kernel_size=1, stride=1
+                )
+                self.conv_s1 = nn.Conv2d(
+                    transformer_dim, transformer_dim // 4, kernel_size=1, stride=1
+                )
+
+            self.output_hypernetworks_mlps = nn.ModuleList(
+                [
+                    MLP(transformer_dim, transformer_dim, transformer_dim // 8, 3)
+                    for i in range(self.num_mask_tokens)
+                ]
+            )
 
         self.iou_prediction_head = MLP(
             transformer_dim,
@@ -222,7 +252,7 @@ class MaskDecoder(nn.Module):
                 self.output_hypernetworks_mlps[i](mask_tokens_out[:, i, :])
             )
         hyper_in = torch.stack(hyper_in_list, dim=1)
-        b, c, h, w = upscaled_embedding.shape   # dim/c=32
+        b, c, h, w = upscaled_embedding.shape   # c=dim/8=32, dim=256
         masks = (hyper_in @ upscaled_embedding.view(b, c, h * w)).view(b, -1, h, w)  # upscaled_embedding: upscaled low-level features
 
         # Generate mask quality predictions

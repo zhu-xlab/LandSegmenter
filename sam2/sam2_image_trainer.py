@@ -77,7 +77,8 @@ class SAM2ImageTrainer(pl.LightningModule):
                                  f'++model.image_encoder.trunk.dofa_name={args.dofa_type}',
                                  f'++model.image_encoder.trunk.dofa_ckpt_path={args.dofa_ckpt_path}',
                                  f'++model.image_encoder.trunk.dofa_wo_rgb={args.dofa_wo_rgb}',
-                                 f'++model.use_auxiliary_decoder={args.use_aux_decoder}',]
+                                 f'++model.use_auxiliary_decoder={args.use_aux_decoder}',
+                                 f'++model.decoder_expand_dim={args.de_expand_dim}',]
         if args.mute_adaptor: hydra_overrides_extra += ['++model.image_encoder.trunk.adaptor=None']
         if args.dofa_unfix_weights: 
             hydra_overrides_extra += ['++model.image_encoder.trunk.dofa_unfix_weights=True']
@@ -94,7 +95,8 @@ class SAM2ImageTrainer(pl.LightningModule):
                                 load_decoder_weights=args.load_de,
                                 load_aux_decoder_weights=args.load_aux_de,
                                 dofa_unfix_weights=args.dofa_unfix_weights, 
-                                hydra_overrides_extra=hydra_overrides_extra)
+                                hydra_overrides_extra=hydra_overrides_extra,
+                                de_expand_dim=args.de_expand_dim,)
 
         # Spatial dim for backbone feature maps
         self._bb_feat_sizes = [

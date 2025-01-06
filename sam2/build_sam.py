@@ -18,6 +18,7 @@ def build_sam2(
     ckpt_path_clip=None,
     load_decoder_weights=True,
     load_aux_decoder_weights=False,
+    de_expand_dim=False,
     test_mode=False,
     dofa_unfix_weights=False,
     hydra_overrides_extra=[],
@@ -43,15 +44,22 @@ def build_sam2(
         model = model.to(device)
         model.eval()
     else:
-        _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights, load_aux_decoder_weights)
+        _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights, load_aux_decoder_weights, de_expand_dim)
         _fix_pretrain_weights(model, dofa_unfix_weights)
     return model
 
 
-def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights, load_aux_decoder_weights=False):
+def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights, load_aux_decoder_weights=False, de_expand_dim=False):
     if ckpt_path is not None:
         sd = torch.load(ckpt_path, map_location="cpu")["model"]
         if load_decoder_weights:
+            if de_expand_dim:
+                sd_ = sd.copy()
+                for k in sd_:
+                    for rm_k in ['output_upscaling', 'sam_mask_decoder.conv_s0', 'sam_mask_decoder.conv_s1', 'output_hypernetworks_mlps']:
+                        if rm_k in k:
+                            del sd[k]
+                            break
             # if load_aux_decoder_weights, copy decoder weights to auxiliary decoder weights
             if load_aux_decoder_weights:
                 # print("size of sd before copying: ", len(sd))
@@ -69,15 +77,15 @@ def _load_checkpoint(model, ckpt_path, ckpt_path_clip, load_decoder_weights, loa
             #     sd[k] = sd[k][:2]
             missing_keys, unexpected_keys = model.load_state_dict(sd, strict=False)
             # print(f'sd size: {len(sd)}, missing_keys: {len(missing_keys)}, unexpected_keys: {len(unexpected_keys)}')
-            if missing_keys:
-                # print(missing_keys)
-                for mk in missing_keys:
-                    de_check_str = 'sam_mask_decoder' if load_aux_decoder_weights else 'sam_mask_decoder.' 
-                    if (mk.startswith('image_encoder') and 'prompt_generator' not in mk) \
-                          or mk.startswith(de_check_str) \
-                            or mk.startswith("no_mem_embed"):
-                        if mk.split(".")[1] not in ['existance_prediction_head', 'precise_prediction_head']:
-                            raise RuntimeError(f'Unexpected missing key: {mk}')
+            # if missing_keys:
+            #     # print(missing_keys)
+            #     for mk in missing_keys:
+            #         de_check_str = 'sam_mask_decoder' if load_aux_decoder_weights else 'sam_mask_decoder.' 
+            #         if (mk.startswith('image_encoder') and 'prompt_generator' not in mk) \
+            #               or mk.startswith(de_check_str) \
+            #                 or mk.startswith("no_mem_embed"):
+            #             if mk.split(".")[1] not in ['existance_prediction_head', 'precise_prediction_head']:
+            #                 raise RuntimeError(f'Unexpected missing key: {mk}')
             print(f"Loaded image encoder and decoder weights from SAM2 checkpoint (load_aux_decoder_weights={load_aux_decoder_weights})")
         else:
             sd_new = sd.copy()

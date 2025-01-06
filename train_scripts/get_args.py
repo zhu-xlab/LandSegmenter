@@ -147,6 +147,7 @@ def get_common_args(parser):
     parser.add_argument('--use-separate-auxiliary-decoder-for-weak-labels', dest='use_sep_aux_de_weak', action='store_true', default=False, help='Whether to use separate auxiliary decoder for each weakly labeled dataset or not')
     parser.add_argument('--use-auxiliary-decoder', dest='use_aux_decoder', action='store_true', default=False, help='Whether to use auxiliary decoder (double decoders) or not')
     parser.add_argument('--share-short-connect-weights', dest='share_connect', action='store_true', default=False, help='Whether to share short connection weights or not when using auxiliary decoder')
+    parser.add_argument('--expand-decoder-dimension', dest='de_expand_dim', action='store_true', default=False, help='Whether to expand decoder dimension or not (False: //4, //8; True: *1, *2 to align with CLIP-base dimension)')
     # logvar smoother settings
     parser.add_argument('--use_logvar_smooth', action='store_true', default=False, help='Whether to use logvar smoother or not')
     parser.add_argument('--fix_logvar_smooth', action='store_true', default=False, help='Whether to fix logvar smoother or not if using logvar smoother')
@@ -194,6 +195,7 @@ def get_common_args(parser):
 
 
 def set_log_files(args, w_unc=False):
+    expand_dim_tag = 'E' if args.de_expand_dim else ''
     # group name
     noise_mask_loss_tag = 'l' if args.use_noise_mask_loss else ''
     if args.use_sep_aux_de_weak:
@@ -205,7 +207,7 @@ def set_log_files(args, w_unc=False):
     args.use_adaptor = not args.mute_adaptor
     if args.use_adaptor:
         if args.dofa_type in [None, 'None']:
-            args.gname = f'FT{aux}'
+            args.gname = f'FT{expand_dim_tag}{aux}'
         else:
             if args.dofa_unfix_weights:
                 dofa_active = 'A'
@@ -215,9 +217,9 @@ def set_log_files(args, w_unc=False):
                 dofa_active = ''    
             if args.dofa_wo_rgb:
                 dofa_active += 'woRGB'               
-            args.gname = f'FT_dofa{args.dofa_type[4]}{dofa_active}{aux}'
+            args.gname = f'FT{expand_dim_tag}_dofa{args.dofa_type[4]}{dofa_active}{aux}'
     else:
-        args.gname = f'FT{aux}_woAd'
+        args.gname = f'FT{expand_dim_tag}{aux}_woAd'
 
     # training size
     subset = f'_sub{args.subset_proportion}' if args.subset_proportion<1 else ''
