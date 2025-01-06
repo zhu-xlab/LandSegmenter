@@ -270,7 +270,8 @@ class MaskDecoder(nn.Module):
                 self.output_hypernetworks_mlps[i](mask_tokens_out[:, i, :])
             )
         hyper_in = torch.stack(hyper_in_list, dim=1)
-        print('hyper_in:', hyper_in.shape, 'upscaled_embedding:', upscaled_embedding.shape)
+        # print('hyper_in:', hyper_in.shape, 'upscaled_embedding:', upscaled_embedding.shape)
+        # hyper_in: torch.Size([24, 4, 512]) upscaled_embedding: torch.Size([24, 512, 256, 256])
         b, c, h, w = upscaled_embedding.shape   # dim=256 | opt1: c=dim/8=32; opt2: c=dim*2=512
         if return_embeddings:
             hyper_in = hyper_in/hyper_in.norm(dim=-1, keepdim=True)

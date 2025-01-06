@@ -399,8 +399,6 @@ class SAM2ImageTrainer(pl.LightningModule):
                                                 batch_size=x.shape[0],
                                                 n_classes=n_class)
                 # image embeddings
-                if new_img_embeddings.shape[-1] != CLIP_FEAT_SIZE:
-                    new_img_embeddings = F.interpolate(new_img_embeddings, size=(CLIP_FEAT_SIZE, CLIP_FEAT_SIZE), mode='bilinear', align_corners=False)
                 new_img_embeddings = rearrange(new_img_embeddings,
                                                '(n_classes batch_size) dim H W -> n_classes batch_size dim H W', 
                                                batch_size=x.shape[0],
@@ -417,7 +415,10 @@ class SAM2ImageTrainer(pl.LightningModule):
                 # for image embeddings
                 img_align_loss = torch.tensor(0., device=self.device)
                 for c in range(n_class):
-                    img_align_loss_ = self.MSELoss(new_img_embeddings[c], clip_img_embeddings)
+                    new_img_embeddings_ = new_img_embeddings[c]
+                    if new_img_embeddings_.shape[-1] != CLIP_FEAT_SIZE:
+                        new_img_embeddings_ = F.interpolate(new_img_embeddings_, size=(CLIP_FEAT_SIZE, CLIP_FEAT_SIZE), mode='bilinear', align_corners=False)
+                    img_align_loss_ = self.MSELoss(new_img_embeddings_, clip_img_embeddings)
                     img_align_loss += img_align_loss_
                 img_align_loss = img_align_loss/n_class
 
