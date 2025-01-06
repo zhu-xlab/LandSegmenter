@@ -27,6 +27,7 @@ class MaskDecoder(nn.Module):
         dynamic_multimask_via_stability=False,
         dynamic_multimask_stability_delta=0.05,
         dynamic_multimask_stability_thresh=0.98,
+        expand_dim: bool = False,
     ) -> None:
         """
         Predicts masks given an image and prompt embeddings, using a
