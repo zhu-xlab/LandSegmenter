@@ -26,6 +26,7 @@ from kornia.losses import (                   # type: ignore
     FocalLoss, DiceLoss
 )
 from sam2.utils.myLosses import SoftDiceLoss
+from sam2.utils.clip_visual_encoder import build_clip_vision_encoder
 
 # import sam2 package
 # from sam2.modeling.sam2_base import SAM2Base
@@ -45,6 +46,8 @@ KEY_WEAKLBL = 'weak'
 MASK_CODE = 255
 INPUT_SIZE = 1024
 TEXT_PREFIX = 'A photo of '
+CLIP_IMG_SIZE = 224
+CLIP_FEAT_SIZE = 224//32
 
 
 ############################### FOR USFS LC ################################
@@ -97,6 +100,12 @@ class SAM2ImageTrainer(pl.LightningModule):
                                 dofa_unfix_weights=args.dofa_unfix_weights, 
                                 hydra_overrides_extra=hydra_overrides_extra,
                                 de_expand_dim=args.de_expand_dim,)
+
+        # align to clip visual
+        self.align_to_clip = args.align_to_clip
+        if self.align_to_clip:
+            self.clip_visual = build_clip_vision_encoder(load_pretrained=args.ckpt_path_clip)
+            self.clip_model_type = args.clip_model_type
 
         # Spatial dim for backbone feature maps
         self._bb_feat_sizes = [
@@ -155,24 +164,30 @@ class SAM2ImageTrainer(pl.LightningModule):
             
 
     # ------ forward propogation ------ #
-    def forward(self, x, prompt, waves=None, use_aux=False):  # text prompt: here is the tokenized tensor
+    def forward(self, x, prompt, waves=None, use_aux=False, return_embeddings=False):  # text prompt: here is the tokenized tensor
         batch_size = x.shape[0]
         # image embeddings
-        # print(f'In trainer-forward: waves - {waves}')
         img_feats = self._get_image_embed(x, waves, use_aux)
         # prompt text embeddings
         n_classes = prompt.shape[0]
-        text_embeddings = self._get_text_embeddings(prompt)
+        text_embeddings = self._get_text_embeddings(prompt)   # change to CLIP plain output text embeddings
         
         # decoder forward
-        masks, iou_predictions, precise_predictions, exist_predictions = \
-            self.forward_decoder(img_feats, text_embeddings, n_classes, batch_size, use_aux=use_aux)
-        
-        return masks, iou_predictions, precise_predictions, exist_predictions, img_feats, text_embeddings
+        outs = self.forward_decoder(img_feats, text_embeddings, n_classes, batch_size, 
+                                    use_aux=use_aux, return_embeddings=return_embeddings)
+        # parser outputs
+        if return_embeddings:
+            masks, iou_predictions, precise_predictions, exist_predictions, embeddings = outs
+            return masks, iou_predictions, precise_predictions, exist_predictions, img_feats, text_embeddings, embeddings
+        else:
+            masks, iou_predictions, precise_predictions, exist_predictions = outs        
+            return masks, iou_predictions, precise_predictions, exist_predictions, img_feats, text_embeddings
     
 
-    def forward_decoder(self, img_feats, text_embeddings, n_classes, batch_size, use_aux=False, return_multiple=False, one_no_noise_mask_embed=False):
+    def forward_decoder(self, img_feats, text_embeddings, n_classes, batch_size, use_aux=False, return_multiple=False, 
+                        one_no_noise_mask_embed=False, return_embeddings=False):
         _, _, h, w = img_feats["image_embed"].shape   # [batch_size, 256, 16, 16]
+        text_embeddings = self.model.sam_prompt_fn(text_embeddings) # [n_prompt, dim] n_prompt=512, dim=256
         # noise mask embeddings
         if one_no_noise_mask_embed:
             no_noise_mask_embed = self.model.no_noise_mask_embed
@@ -193,17 +208,27 @@ class SAM2ImageTrainer(pl.LightningModule):
         else:
             mask_decoder = getattr(self.model, f'sam_mask_decoder_aux_{use_aux}')
             high_res_key = f'high_res_feats_aux_{use_aux}'
-        masks, iou_predictions, precise_predictions, exist_predictions = self._pred_mask_and_iou(
+        outs = self._pred_mask_and_iou(
             mask_decoder,
             img_feats, text_embeddings, noise_mask_embeddings,
             n_classes, batch_size,
             high_res_key,
-            return_multiple=return_multiple)
+            return_multiple=return_multiple,
+            return_embeddings=return_embeddings)
+        # parser outputs
+        masks, iou_predictions, precise_predictions, exist_predictions = outs[:4]
         
-        return masks, iou_predictions, precise_predictions, exist_predictions
+        # parser outputs
+        if return_embeddings:
+            embeddings = outs[-1]
+            return masks, iou_predictions, precise_predictions, exist_predictions, embeddings
+        else:
+            return masks, iou_predictions, precise_predictions, exist_predictions
 
     
-    def forward_decoder_w_mask(self, noise_mask, img_feats, text_embeddings, use_aux=False, return_multiple=False):
+    def forward_decoder_w_mask(self, noise_mask, img_feats, text_embeddings, use_aux=False, return_multiple=False,
+                               return_embeddings=False):
+        text_embeddings = self.model.sam_prompt_fn(text_embeddings) # [n_prompt, dim] n_prompt=512, dim=256
         n_classes = text_embeddings.shape[0]
         batch_size = noise_mask.shape[0]
         # prepare binary masks
@@ -231,14 +256,21 @@ class SAM2ImageTrainer(pl.LightningModule):
         else:
             mask_decoder = getattr(self.model, f'sam_mask_decoder_aux_{use_aux}')
             high_res_key = f'high_res_feats_aux_{use_aux}'
-        masks, iou_predictions, precise_predictions, exist_predictions = self._pred_mask_and_iou(
+        outs = self._pred_mask_and_iou(
             mask_decoder,
             img_feats, text_embeddings, noise_mask_embeddings,
             n_classes, batch_size,
             high_res_key,
-            return_multiple=return_multiple)
-        
-        return masks, iou_predictions, precise_predictions, exist_predictions
+            return_multiple=return_multiple,
+            return_embeddings=return_embeddings)
+        # parser outputs
+        masks, iou_predictions, precise_predictions, exist_predictions = outs[:4]
+
+        if return_embeddings:
+            embeddings = outs[-1]
+            return masks, iou_predictions, precise_predictions, exist_predictions, embeddings
+        else:
+            return masks, iou_predictions, precise_predictions, exist_predictions
         
 
     # ------ Optimizer ------ #
@@ -321,19 +353,28 @@ class SAM2ImageTrainer(pl.LightningModule):
         # # # major forward process # # #            
         # image embeddings
         img_feats = self._get_image_embed(x, waves, False)
+        # clip image embeddings
+        if self.align_to_clip:
+            with torch.no_grad():
+                if x.shape[-1] != CLIP_IMG_SIZE:
+                    x_ = F.interpolate(x[:, :3], size=(CLIP_IMG_SIZE, CLIP_IMG_SIZE), mode='bilinear', align_corners=False).contiguous()
+                clip_img_embeddings = self.clip_visual(x_, model_type=self.clip_model_type)
+                clip_img_embeddings /= clip_img_embeddings.norm(dim=-1, keepdim=True)
+                clip_img_embeddings = clip_img_embeddings.permute(0, 2, 1).reshape(x.shape[0], -1, CLIP_FEAT_SIZE, CLIP_FEAT_SIZE)
 
         # make predictions and calculate losses
-        loss = torch.tensor(0., device=self.device)
+        loss, loss_t, loss_v = torch.tensor(0., device=self.device), torch.tensor(0., device=self.device), torch.tensor(0., device=self.device)
         for y, y_exist, n_class, prompt_token, name_key in zip(ys, y_exists, n_classes, prompt_tokens, cls_name_keys): 
-            text_embeddings = self._get_text_embeddings(prompt_token)
+            with torch.no_grad():
+                text_embeddings = self._get_text_embeddings(prompt_token)
 
             # prediction
-            masks, iou_predictions, precise_predictions, exist_predictions = \
-                self.forward_decoder(img_feats, text_embeddings, n_class, x.shape[0])
+            outs = self.forward_decoder(img_feats, text_embeddings, n_class, x.shape[0], return_embeddings=self.align_to_clip)
+            # parser outputs
+            masks, iou_predictions, precise_predictions, exist_predictions = outs[:4]
+            # check output shape
             if masks.shape[-2:] != y.shape[-2:]:
-                # print('masks original shp:', masks.shape[-2:])
                 masks = F.interpolate(masks, size=y.shape[-2:], mode='bilinear', align_corners=False)
-                # print('masks new shp:', masks.shape[-2:])
         
             # prediction accuracies
             if if_weak_lbl:
@@ -341,12 +382,49 @@ class SAM2ImageTrainer(pl.LightningModule):
             else:
                 precises, ious = self._get_accs(masks.detach(), y)
         
-            # calculate losses 
+            # calculate segmentation and classification losses 
             class_weights = self.class_weight_tensors[name_key] if self.use_class_weights else None
             loss_ = self._calculate_loss(n_class, y, y_exist, ious, precises, 
                                          masks, exist_predictions, iou_predictions, precise_predictions,
                                          class_weights=class_weights, log=False,
                                          )
+            
+            # -------------------------------alignment losses----------------------------------
+            if self.align_to_clip:
+                # # rearrange output embeddings
+                new_text_embeddings, new_img_embeddings = outs[-1]
+                # text embeddings
+                new_text_embeddings = rearrange(new_text_embeddings,
+                                                '(n_classes batch_size) n_mask dim -> n_classes batch_size n_mask dim', 
+                                                batch_size=x.shape[0],
+                                                n_classes=n_class)
+                # image embeddings
+                if new_img_embeddings.shape[-1] != CLIP_FEAT_SIZE:
+                    new_img_embeddings = F.interpolate(new_img_embeddings, size=(CLIP_FEAT_SIZE, CLIP_FEAT_SIZE), mode='bilinear', align_corners=False)
+                new_img_embeddings = rearrange(new_img_embeddings,
+                                               '(n_classes batch_size) dim H W -> n_classes batch_size dim H W', 
+                                               batch_size=x.shape[0],
+                                               n_classes=n_class)
+
+                # calculate alignment losses
+                # for text embeddings
+                text_align_loss = torch.tensor(0., device=self.device)
+                text_embeddings = text_embeddings / text_embeddings.norm(dim=-1, keepdim=True)
+                for m in range(new_text_embeddings.shape[2]):
+                    text_align_loss_ = self.MSELoss(new_text_embeddings[:,:,m], text_embeddings[:,None].repeat(1, x.shape[0], 1))
+                    text_align_loss += text_align_loss_
+                text_align_loss = text_align_loss/new_text_embeddings.shape[2]
+                # for image embeddings
+                img_align_loss = torch.tensor(0., device=self.device)
+                for c in range(n_class):
+                    img_align_loss_ = self.MSELoss(new_img_embeddings[c], clip_img_embeddings)
+                    img_align_loss += img_align_loss_
+                img_align_loss = img_align_loss/n_class
+
+                loss_ = loss_ + text_align_loss + img_align_loss
+                loss_t = loss_t + text_align_loss
+                loss_v = loss_v + img_align_loss
+            # -------------------------------alignment losses----------------------------------
 
             # training image examples  
             if batch_idx<2 and self.trainer.global_rank==0 and self.current_epoch%self.display_inv==0:
@@ -357,7 +435,12 @@ class SAM2ImageTrainer(pl.LightningModule):
         
         # log loss
         self.log('tr_loss', loss, on_epoch=True, on_step=False, sync_dist=True) #, batch_size=x.shape[0])
-        
+        if self.align_to_clip:
+            loss_t = loss_t/len(ys)
+            loss_v = loss_v/len(ys)
+            self.log('tr_loss_talign', loss_t, on_epoch=True, on_step=False, sync_dist=True)
+            self.log('tr_loss_valign', loss_v, on_epoch=True, on_step=False, sync_dist=True)
+
         return loss
     
 
@@ -681,12 +764,13 @@ class SAM2ImageTrainer(pl.LightningModule):
 
     def _get_text_embeddings(self, prompt):
         text_embeddings = self.model.sam_prompt_encoder(prompt) # [n_prompt, dim] dim=512 (clip dim)
-        text_embeddings = self.model.sam_prompt_fn(text_embeddings) # [n_prompt, dim] dim=256
+        # text_embeddings = self.model.sam_prompt_fn(text_embeddings) # [n_prompt, dim] dim=256
         return text_embeddings
 
 
     def _pred_mask_and_iou(self, decoder, img_feats, text_embeddings, noise_mask_embeddings,
-                           n_classes, batch_size, high_res_key='high_res_feats', return_multiple=False):
+                           n_classes, batch_size, high_res_key='high_res_feats', 
+                           return_multiple=False, return_embeddings=False):
         # rearrange text embeddings
         text_embeddings = rearrange(text_embeddings.unsqueeze(0).expand(batch_size, -1, -1),
                                     'batch_size n_classes dim -> (n_classes batch_size) dim', 
@@ -699,13 +783,15 @@ class SAM2ImageTrainer(pl.LightningModule):
         ]
 
         # get predictions
-        masks, iou_predictions, precise_predictions, exist_predictions = decoder(
+        outs = decoder(
             image_embeddings=img_feats["image_embed"].repeat(n_classes, 1, 1, 1),
             text_embeddings=text_embeddings.unsqueeze(1),
             noise_mask_embeddings=noise_mask_embeddings,
             high_res_features=high_res_features,
             multimask_output=return_multiple,
+            return_embeddings=return_embeddings,
         )
+        masks, iou_predictions, precise_predictions, exist_predictions = outs[:4]
 
         # mask predictions
         # masks = (torch.clamp(masks, -32.0, 32.0) + 32.0)/64.0
@@ -739,7 +825,11 @@ class SAM2ImageTrainer(pl.LightningModule):
                                       n_classes=n_classes)
         
         # outputs
-        return masks, iou_predictions, precise_predictions, exist_predictions
+        if return_embeddings:
+            embeddings = outs[-1]
+            return masks, iou_predictions, precise_predictions, exist_predictions, embeddings
+        else:
+            return masks, iou_predictions, precise_predictions, exist_predictions
     
     
     def _set_loss_functions(self):
@@ -768,7 +858,11 @@ class SAM2ImageTrainer(pl.LightningModule):
                                    alpha=None,
                                    weight=None,
                                    ignore_index=MASK_CODE)
-            
+        
+        # alignment loss
+        if self.align_to_clip:
+            self.MSELoss = nn.MSELoss()
+
         return
 
 

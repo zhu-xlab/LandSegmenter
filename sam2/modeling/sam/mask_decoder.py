@@ -153,6 +153,7 @@ class MaskDecoder(nn.Module):
         multimask_output: bool = False,
         repeat_image: bool = False,
         high_res_features: Optional[List[torch.Tensor]] = None,
+        return_embeddings: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Predict masks given image and prompt embeddings.
@@ -171,13 +172,15 @@ class MaskDecoder(nn.Module):
           torch.Tensor: batched SAM token for mask output
         """
         # masks, iou_pred, mask_tokens_out, object_score_logits = self.predict_masks(
-        masks, iou_pred, precise_pred, exist_pred, _ = self.predict_masks(
+        outs = self.predict_masks(
             image_embeddings=image_embeddings,
             text_embeddings=text_embeddings,
             noise_mask_embeddings=noise_mask_embeddings,
             repeat_image=repeat_image,
             high_res_features=high_res_features,
+            return_embeddings=return_embeddings,
         )
+        masks, iou_pred, precise_pred, exist_pred = outs[:4]
 
         # Select the correct mask or masks for output
         # if multimask_output:  output all masks (n=2 in our case, =3 by default in sam2)
@@ -195,7 +198,11 @@ class MaskDecoder(nn.Module):
             exist_pred = exist_pred[:, 0:1]
 
         # Prepare output
-        return masks, iou_pred, precise_pred, exist_pred
+        if return_embeddings:
+            embeddings = outs[-1]
+            return masks, iou_pred, precise_pred, exist_pred, embeddings
+        else:
+            return masks, iou_pred, precise_pred, exist_pred
 
     def predict_masks(
         self,
@@ -204,6 +211,7 @@ class MaskDecoder(nn.Module):
         noise_mask_embeddings: torch.Tensor,
         repeat_image: bool,
         high_res_features: Optional[List[torch.Tensor]] = None,
+        return_embeddings: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Predicts masks. See 'forward' for more details."""
         # Concatenate output tokens
@@ -262,8 +270,13 @@ class MaskDecoder(nn.Module):
                 self.output_hypernetworks_mlps[i](mask_tokens_out[:, i, :])
             )
         hyper_in = torch.stack(hyper_in_list, dim=1)
-        b, c, h, w = upscaled_embedding.shape   # c=dim/8=32, dim=256
+        print('hyper_in:', hyper_in.shape, 'upscaled_embedding:', upscaled_embedding.shape)
+        b, c, h, w = upscaled_embedding.shape   # dim=256 | opt1: c=dim/8=32; opt2: c=dim*2=512
+        if return_embeddings:
+            hyper_in = hyper_in/hyper_in.norm(dim=-1, keepdim=True)
+            upscaled_embedding = upscaled_embedding/upscaled_embedding.norm(dim=1, keepdim=True) 
         masks = (hyper_in @ upscaled_embedding.view(b, c, h * w)).view(b, -1, h, w)  # upscaled_embedding: upscaled low-level features
+        # b: batch_size*n_class; c:final_feat_dim; h,w: image_size
 
         # Generate mask quality predictions
         iou_pred = self.iou_prediction_head(iou_token_out)
@@ -272,7 +285,10 @@ class MaskDecoder(nn.Module):
         # Generate class existence predictions
         exist_pred = self.existance_prediction_head(iou_token_out)
         
-        return masks, iou_pred, precise_pred, exist_pred, mask_tokens_out
+        if return_embeddings:
+            return masks, iou_pred, precise_pred, exist_pred, mask_tokens_out, [hyper_in, upscaled_embedding]
+        else:
+            return masks, iou_pred, precise_pred, exist_pred, mask_tokens_out
 
     def _get_stability_scores(self, mask_logits):
         """

@@ -247,7 +247,7 @@ class PromptEncoderCLIP(nn.Module):
         return mask
 
     def encode_text(self, text):
-        x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
+        x = self.token_embedding(text).type(self.dtype)  # [n_class (n of text), n_ctx (context length, 77 by default), d_model]
 
         x = x + self.positional_embedding.type(self.dtype)
         x = x.permute(1, 0, 2)  # NLD -> LND

@@ -148,6 +148,9 @@ def get_common_args(parser):
     parser.add_argument('--use-auxiliary-decoder', dest='use_aux_decoder', action='store_true', default=False, help='Whether to use auxiliary decoder (double decoders) or not')
     parser.add_argument('--share-short-connect-weights', dest='share_connect', action='store_true', default=False, help='Whether to share short connection weights or not when using auxiliary decoder')
     parser.add_argument('--expand-decoder-dimension', dest='de_expand_dim', action='store_true', default=False, help='Whether to expand decoder dimension or not (False: //4, //8; True: *1, *2 to align with CLIP-base dimension)')
+    # alignment to clip
+    parser.add_argument('--align-to-clip', action='store_true', default=False, help='Whether using distillation losses to align the model to clip feature space or not')
+    parser.add_argument('--clip-model-type', type=str, choices=['vanilla', 'MaskCLIP', 'GEM', 'SCLIP', 'ClearCLIP'], default='ClearCLIP', help='Type of clip model used for feature alignment.')
     # logvar smoother settings
     parser.add_argument('--use_logvar_smooth', action='store_true', default=False, help='Whether to use logvar smoother or not')
     parser.add_argument('--fix_logvar_smooth', action='store_true', default=False, help='Whether to fix logvar smoother or not if using logvar smoother')
@@ -236,6 +239,10 @@ def set_log_files(args, w_unc=False):
     args.gname += f'_{args.ckpt_path_clip.split("/")[-1][:4]}'
     # # # # # # For debugging stage # # # # # 
     # args.gname += 'new' 
+
+    # alignment settings
+    if args.align_to_clip:
+        args.gname += f'_a{args.clip_model_type}'
         
     # job type
     args.job_type = f'{int(args.wfocal)}F_{int(args.wdice)}D_{int(args.wce)}C' 
