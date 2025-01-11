@@ -114,7 +114,7 @@ def main():
         
         
         ###### 4 - train the model ######
-        print('Start testing...')
+        print(f'Start testing with {args.ts_wpath}')
         trainer = pl.Trainer(accelerator=args.accelerator,
                              devices=args.devices,
                              strategy=args.strategy,

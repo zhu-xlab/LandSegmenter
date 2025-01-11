@@ -14,7 +14,7 @@ from torch.nn.init import trunc_normal_
 
 from sam2.modeling.sam.mask_decoder import MaskDecoder
 from sam2.modeling.sam.prompt_encoder import PromptEncoderCLIP
-from sam2.modeling.sam.transformer import TwoWayTransformer
+from sam2.modeling.sam.transformer import TwoWayTransformer, TwoWayTransformer_opt2
 from sam2.modeling.sam2_utils import LayerNorm2d, get_logvar_smooth_layer
 # from sam2.modeling.sam2_utils import get_1d_sine_pe, MLP, select_closest_cond_frames
 
@@ -37,6 +37,8 @@ class SAM2Base(torch.nn.Module):
         sam_mask_decoder_extra_args=None,
         compile_image_encoder: bool = False,
         decoder_expand_dim: bool = False,
+        decoder_use_opt_two: bool = False,
+        decoder_use_feature_norm: bool = False,
     ):
         super().__init__()
 
@@ -57,8 +59,8 @@ class SAM2Base(torch.nn.Module):
         self.image_size = image_size
         self.backbone_stride = backbone_stride
         self.sam_mask_decoder_extra_args = sam_mask_decoder_extra_args
-        
-        self._build_sam_heads(decoder_expand_dim)
+
+        self._build_sam_heads(decoder_expand_dim, decoder_use_opt_two, decoder_use_feature_norm)
         
         # Model compilation
         if compile_image_encoder:
@@ -76,7 +78,7 @@ class SAM2Base(torch.nn.Module):
         # logvar smooth layer
         self.use_logvar_smooth = use_logvar_smooth
         if self.use_logvar_smooth:
-            self.logvar_smoother = get_logvar_smooth_layer(kernel_size=3, n_depth=2, no_grads=fix_logvar_smooth)           
+            self.logvar_smoother = get_logvar_smooth_layer(kernel_size=3, n_depth=2, no_grads=fix_logvar_smooth)         
 
 
     def forward(self, *args, **kwargs):
@@ -86,7 +88,7 @@ class SAM2Base(torch.nn.Module):
         )
 
 
-    def _build_sam_heads(self, decoder_expand_dim):
+    def _build_sam_heads(self, decoder_expand_dim, decoder_use_opt_two, decoder_use_feature_norm):
         """Build SAM-style prompt encoder and mask decoder."""
         self.sam_prompt_embed_dim = self.hidden_dim
         self.sam_image_embedding_size = self.image_size // self.backbone_stride
@@ -102,9 +104,10 @@ class SAM2Base(torch.nn.Module):
             transformer_width=512,  # 512 by default for CLIP (base) / 768 - large
         )
         self.sam_prompt_fn = torch.nn.Linear(clip_embed_dim, self.sam_prompt_embed_dim, bias=True)
+        trans = TwoWayTransformer_opt2 if decoder_use_opt_two else TwoWayTransformer
         self.sam_mask_decoder = MaskDecoder(
             num_multimask_outputs=NUM_MULTIOUTPUTS,
-            transformer=TwoWayTransformer(
+            transformer=trans(
                 depth=2,
                 embedding_dim=self.sam_prompt_embed_dim,
                 mlp_dim=2048,
@@ -116,6 +119,8 @@ class SAM2Base(torch.nn.Module):
             use_high_res_features=self.use_high_res_features_in_sam,
             iou_prediction_use_sigmoid=self.iou_prediction_use_sigmoid,
             expand_dim=decoder_expand_dim,
+            use_opt_two=decoder_use_opt_two,
+            use_feature_norm=decoder_use_feature_norm,
             **(self.sam_mask_decoder_extra_args or {}),
         )
         # for noise mask quality prediction
@@ -134,7 +139,7 @@ class SAM2Base(torch.nn.Module):
         if self.use_auxiliary_decoder==1:
             self.sam_mask_decoder_aux = MaskDecoder(
                 num_multimask_outputs=NUM_MULTIOUTPUTS,
-                transformer=TwoWayTransformer(
+                transformer=trans(
                     depth=2,
                     embedding_dim=self.sam_prompt_embed_dim,
                     mlp_dim=2048,
@@ -146,6 +151,8 @@ class SAM2Base(torch.nn.Module):
                 use_high_res_features=self.use_high_res_features_in_sam,
                 iou_prediction_use_sigmoid=self.iou_prediction_use_sigmoid,
                 expand_dim=decoder_expand_dim,
+                use_opt_two=decoder_use_opt_two,
+                use_feature_norm=decoder_use_feature_norm,
                 **(self.sam_mask_decoder_extra_args or {}),
             )
             # for noise mask quality prediction
@@ -163,7 +170,7 @@ class SAM2Base(torch.nn.Module):
             for i in range(self.use_auxiliary_decoder):
                 sam_mask_decoder_aux = MaskDecoder(
                     num_multimask_outputs=NUM_MULTIOUTPUTS,
-                    transformer=TwoWayTransformer(
+                    transformer=trans(
                         depth=2,
                         embedding_dim=self.sam_prompt_embed_dim,
                         mlp_dim=2048,
@@ -175,6 +182,8 @@ class SAM2Base(torch.nn.Module):
                     use_high_res_features=self.use_high_res_features_in_sam,
                     iou_prediction_use_sigmoid=self.iou_prediction_use_sigmoid,
                     expand_dim=decoder_expand_dim,
+                    use_opt_two=decoder_use_opt_two,
+                    use_feature_norm=decoder_use_feature_norm,
                     **(self.sam_mask_decoder_extra_args or {}),
                 )
                 setattr(self, f'sam_mask_decoder_aux_{i}', sam_mask_decoder_aux)

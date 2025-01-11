@@ -28,6 +28,8 @@ class MaskDecoder(nn.Module):
         dynamic_multimask_stability_delta=0.05,
         dynamic_multimask_stability_thresh=0.98,
         expand_dim: bool = False,
+        use_opt_two: bool = False,
+        use_feature_norm: bool = False,
     ) -> None:
         """
         Predicts masks given an image and prompt embeddings, using a
@@ -144,6 +146,10 @@ class MaskDecoder(nn.Module):
         self.dynamic_multimask_via_stability = dynamic_multimask_via_stability
         self.dynamic_multimask_stability_delta = dynamic_multimask_stability_delta
         self.dynamic_multimask_stability_thresh = dynamic_multimask_stability_thresh
+        
+        # other settings
+        self.use_opt_one = (not use_opt_two)  
+        self.use_feature_norm = use_feature_norm
 
     def forward(
         self,
@@ -234,7 +240,8 @@ class MaskDecoder(nn.Module):
         # Add noise mask info for quality prediction  (option 1/2 changes are also in transformer.py)
         # ------------------------------------------------------------------------------------------------
         # ------ option 1: adding noise_mask_embeddings to image embeddings without new key tpyes
-        # src = src + noise_mask_embeddings
+        if self.use_opt_one:
+            src = src + noise_mask_embeddings
         # ------ option 2: regard noise_mask_embeddings as another key type, so no addtion applied here
         # ------------------------------------------------------------------------------------------------
         # src = src + dense_prompt_embeddings
@@ -247,9 +254,11 @@ class MaskDecoder(nn.Module):
         # Run the transformer
         # ------------------------------------------------------------------------------------------------
         # ------ option 1: adding noise_mask_embeddings to image embeddings without new key tpyes
-        # hs, src = self.transformer(src, tokens) # (src, pos_src, tokens)
+        if self.use_opt_one:
+            hs, src = self.transformer(src, tokens) # (src, pos_src, tokens)
         # ------ option 2: regard noise_mask_embeddings as another key type
-        hs, src = self.transformer(src, noise_mask_embeddings, tokens)
+        else:
+            hs, src = self.transformer(src, noise_mask_embeddings, tokens)
         # ------------------------------------------------------------------------------------------------
         iou_token_out = hs[:, s, :]
         mask_tokens_out = hs[:, s + 1 : (s + 1 + self.num_mask_tokens), :]
@@ -273,7 +282,7 @@ class MaskDecoder(nn.Module):
         # print('hyper_in:', hyper_in.shape, 'upscaled_embedding:', upscaled_embedding.shape)
         # hyper_in: torch.Size([24, 4, 512]) upscaled_embedding: torch.Size([24, 512, 256, 256])
         b, c, h, w = upscaled_embedding.shape   # dim=256 | opt1: c=dim/8=32; opt2: c=dim*2=512
-        if return_embeddings:
+        if self.use_feature_norm:
             hyper_in = hyper_in/hyper_in.norm(dim=-1, keepdim=True)
             upscaled_embedding = upscaled_embedding/upscaled_embedding.norm(dim=1, keepdim=True) 
         masks = (hyper_in @ upscaled_embedding.view(b, c, h * w)).view(b, -1, h, w)  # upscaled_embedding: upscaled low-level features
@@ -287,7 +296,7 @@ class MaskDecoder(nn.Module):
         exist_pred = self.existance_prediction_head(iou_token_out)
         
         if return_embeddings:
-            return masks, iou_pred, precise_pred, exist_pred, mask_tokens_out, [hyper_in, upscaled_embedding]
+            return masks, iou_pred, precise_pred, exist_pred, mask_tokens_out, [hyper_in, upscaled_embedding, src]
         else:
             return masks, iou_pred, precise_pred, exist_pred, mask_tokens_out
 

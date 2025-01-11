@@ -148,9 +148,12 @@ def get_common_args(parser):
     parser.add_argument('--use-auxiliary-decoder', dest='use_aux_decoder', action='store_true', default=False, help='Whether to use auxiliary decoder (double decoders) or not')
     parser.add_argument('--share-short-connect-weights', dest='share_connect', action='store_true', default=False, help='Whether to share short connection weights or not when using auxiliary decoder')
     parser.add_argument('--expand-decoder-dimension', dest='de_expand_dim', action='store_true', default=False, help='Whether to expand decoder dimension or not (False: //4, //8; True: *1, *2 to align with CLIP-base dimension)')
+    parser.add_argument('--use-cross-attention-two-way-trans', dest='opt_two', action='store_true', default=False, help='Whether to use noise mask embedding as an additional input in the two-way transformer (option 2) or not (option 1).')
+    parser.add_argument('--use-feature-norm', action='store_true', default=False, help='Whether to use feature normalization or not when generating masks')
     # alignment to clip
     parser.add_argument('--align-to-clip', action='store_true', default=False, help='Whether using distillation losses to align the model to clip feature space or not')
     parser.add_argument('--clip-model-type', type=str, choices=['vanilla', 'MaskCLIP', 'GEM', 'SCLIP', 'ClearCLIP'], default='ClearCLIP', help='Type of clip model used for feature alignment.')
+    parser.add_argument('--align-loss-type', type=str, choices=['mse', 'l1', 'kl', 'ce', 'cos'], default='mse', help='Type of loss used for feature alignment.')
     # logvar smoother settings
     parser.add_argument('--use_logvar_smooth', action='store_true', default=False, help='Whether to use logvar smoother or not')
     parser.add_argument('--fix_logvar_smooth', action='store_true', default=False, help='Whether to fix logvar smoother or not if using logvar smoother')
@@ -177,6 +180,7 @@ def get_common_args(parser):
     parser.add_argument('--class_weights_scale', type=float, default=10, help='Scale of class weights')
     parser.add_argument('--iou_no_object_weight', dest='wiou_no', type=float, default=0.5, help='Weight of iou loss for no object')
     parser.add_argument('--use_multiclass_loss', action='store_true', default=False, help='Use multiclass loss or not')
+    parser.add_argument('--use_binary_class_scale', action='store_true', default=False, help='Use number of classes as the binary loss scale or not.')
     parser.add_argument('--amp', action='store_false', default=True, help='Use mixed precision or not')
     parser.add_argument('--scheduler_type', dest='schdt', type=str, default='none', choices=['none','cos','step','exp'], help='Type of scheduler to use')
     parser.add_argument('--scheduler_values', dest='schdv', type=float, nargs='*', default=[], help='Values of scheduler to use (the epoch indexes for step scheduler; number of iterations for cosine scheduler)')
@@ -235,6 +239,8 @@ def set_log_files(args, w_unc=False):
         args.gname += '_deN'
     # using multiclass loss or not
     args.gname += '_mcloss' if args.use_multiclass_loss else ''
+    # using binary loss scale or not
+    args.gname += '_bscale' if args.use_binary_class_scale else ''
     # language model type
     args.gname += f'_{args.ckpt_path_clip.split("/")[-1][:4]}'
     # # # # # # For debugging stage # # # # # 
@@ -242,7 +248,7 @@ def set_log_files(args, w_unc=False):
 
     # alignment settings
     if args.align_to_clip:
-        args.gname += f'_a{args.clip_model_type}'
+        args.gname += f'_a{args.clip_model_type}_{args.align_loss_type}'
         
     # job type
     args.job_type = f'{int(args.wfocal)}F_{int(args.wdice)}D_{int(args.wce)}C' 
@@ -257,7 +263,7 @@ def set_log_files(args, w_unc=False):
         if args.schdt=='step':
             for dv in args.schdv: args.job_type += f'_{int(dv)}'
         elif args.schdt=='exp':
-            args.job_type += f'_{int(args.schdv[0]*100)}'
+            args.job_type += f'_{int(args.schdv[0]*1000)}'
         elif args.schdt=='cos':
             if args.schdv[0]>0:
                 args.job_type += f'_w{int(args.schdv[0])}_cos{int(args.schdv[1])}'
@@ -267,6 +273,9 @@ def set_log_files(args, w_unc=False):
                 ea = int(np.ceil(np.log10(1/args.schdv[2])))
                 eb = int(args.schdv[2]*10**ea)
                 args.job_type += f'_f{eb}e{ea}'  # final_lr setting
+    # feature normalization setting
+    if args.use_feature_norm: 
+        args.job_type += '_norm'
     # for uncertainty part
     if w_unc:
         args.gname += f'_unc{args.weak_weight_final}'
@@ -281,25 +290,28 @@ def set_log_files(args, w_unc=False):
     # args.job_type += args.debug
 
     # saving dirs
+    if args.opt_two and 'opt2' not in args.save_dir:
+        args.save_dir += '_opt2'
     # for test only
-    if args.test_only: 
-        # parent dir
-        if args.ts_wpath is None:
-            args.pdir = os.path.join(args.save_dir, args.gname) 
-            ep = 0 
-        else:
-            args.pdir = os.path.join(args.save_dir, args.gname, args.job_type, f"mcr_{args.mcr}_seed_{args.seed}_bs_{args.bs}")
-            ep_str = args.ts_wpath.split('epoch=')[1].split('-')[0]
-            ep = int(ep_str)
-        # test dir
-        args.pdir = os.path.join(args.pdir, f'test_ep{ep}')
-        Path(args.pdir).mkdir(parents=True, exist_ok=True)
+    # if args.test_only: 
+    #     # parent dir
+    #     if args.ts_wpath is None:
+    #         args.pdir = os.path.join(args.save_dir, args.gname) 
+    #         ep = 0 
+    #     else:
+    #         args.pdir = os.path.join(args.save_dir, args.gname, args.job_type, f"mcr_{args.mcr}_seed_{args.seed}_bs_{args.bs}")
+    #         ep_str = args.ts_wpath.split('epoch=')[1].split('-')[0]
+    #         ep = int(ep_str)
+    #     # test dir
+    #     args.pdir = os.path.join(args.pdir, f'test_ep{ep}')
+    #     Path(args.pdir).mkdir(parents=True, exist_ok=True)
         
-        # log outputs to txt file
-        acc_txt = os.path.join(args.pdir, 'outputs.txt')
-        sys.stdout = open(acc_txt, 'w')
+    #     # log outputs to txt file
+    #     acc_txt = os.path.join(args.pdir, 'outputs.txt')
+    #     sys.stdout = open(acc_txt, 'w')
     # for fine-tuning training
-    else:
+    # else:
+    if not args.test_only:
         # parent dir
         args.pdir = os.path.join(args.save_dir, args.gname, args.job_type, f"seed_{args.seed}_bs_{args.bs}")
         # checkpoint saving dir

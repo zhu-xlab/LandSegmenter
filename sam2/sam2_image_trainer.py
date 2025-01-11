@@ -81,7 +81,9 @@ class SAM2ImageTrainer(pl.LightningModule):
                                  f'++model.image_encoder.trunk.dofa_ckpt_path={args.dofa_ckpt_path}',
                                  f'++model.image_encoder.trunk.dofa_wo_rgb={args.dofa_wo_rgb}',
                                  f'++model.use_auxiliary_decoder={args.use_aux_decoder}',
-                                 f'++model.decoder_expand_dim={args.de_expand_dim}',]
+                                 f'++model.decoder_expand_dim={args.de_expand_dim}',
+                                 f'++model.decoder_use_opt_two={args.opt_two}',
+                                 f'++model.decoder_use_feature_norm={args.use_feature_norm}',]
         if args.mute_adaptor: hydra_overrides_extra += ['++model.image_encoder.trunk.adaptor=None']
         if args.dofa_unfix_weights: 
             hydra_overrides_extra += ['++model.image_encoder.trunk.dofa_unfix_weights=True']
@@ -106,6 +108,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         if self.align_to_clip:
             self.clip_visual = build_clip_vision_encoder(load_pretrained=args.ckpt_path_clip)
             self.clip_model_type = args.clip_model_type
+            self.align_loss_type = args.align_loss_type
 
         # Spatial dim for backbone feature maps
         self._bb_feat_sizes = [
@@ -126,9 +129,10 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.wiou_no = args.wiou_no
         # set up the losses: dice and focal
         self.use_multiclass_loss = args.use_multiclass_loss
+        self.use_binary_class_scale = args.use_binary_class_scale
         self.use_class_weights = args.use_class_weights
         self.class_weights_scale = args.class_weights_scale
-        self._set_loss_functions()
+        self._set_loss_functions(args.align_loss_type)
         # self.wunsure = args.winlbl  # incompletely labeled patches are regarded as unsure, assigning a smaller weight
         # optimizer
         self.opt = args.opt
@@ -359,8 +363,14 @@ class SAM2ImageTrainer(pl.LightningModule):
                 if x.shape[-1] != CLIP_IMG_SIZE:
                     x_ = F.interpolate(x[:, :3], size=(CLIP_IMG_SIZE, CLIP_IMG_SIZE), mode='bilinear', align_corners=False).contiguous()
                 clip_img_embeddings = self.clip_visual(x_, model_type=self.clip_model_type)
-                clip_img_embeddings /= clip_img_embeddings.norm(dim=-1, keepdim=True)
-                clip_img_embeddings = clip_img_embeddings.permute(0, 2, 1).reshape(x.shape[0], -1, CLIP_FEAT_SIZE, CLIP_FEAT_SIZE)
+                # clip_img_embeddings /= clip_img_embeddings.norm(dim=-1, keepdim=True)
+                # if self.trainer.global_step==0:
+                #     print(f'clip_img_embeddings1 shape: {clip_img_embeddings.shape}')  # bs, n_patch(CLIP_FEAT_SIZE**2), dim
+                # clip_img_embeddings = clip_img_embeddings.permute(0, 2, 1).reshape(x.shape[0], -1, CLIP_FEAT_SIZE, CLIP_FEAT_SIZE)
+                clip_img_embeddings = clip_img_embeddings.reshape(-1, clip_img_embeddings.shape[-1])
+                if self.align_loss_type == 'kl': clip_img_embeddings = F.softmax(clip_img_embeddings, dim=1)
+                # if self.trainer.global_step==0:
+                #     print(f'clip_img_embeddings2 shape: {clip_img_embeddings.shape}')   # bs, dim, CLIP_FEAT_SIZE, CLIP_FEAT_SIZE
 
         # make predictions and calculate losses
         loss, loss_t, loss_v = torch.tensor(0., device=self.device), torch.tensor(0., device=self.device), torch.tensor(0., device=self.device)
@@ -393,11 +403,11 @@ class SAM2ImageTrainer(pl.LightningModule):
             if self.align_to_clip:
                 # # rearrange output embeddings
                 new_text_embeddings, new_img_embeddings = outs[-1]
-                # text embeddings
-                new_text_embeddings = rearrange(new_text_embeddings,
-                                                '(n_classes batch_size) n_mask dim -> n_classes batch_size n_mask dim', 
-                                                batch_size=x.shape[0],
-                                                n_classes=n_class)
+                # # text embeddings
+                # new_text_embeddings = rearrange(new_text_embeddings,
+                #                                 '(n_classes batch_size) n_mask dim -> n_classes batch_size n_mask dim', 
+                #                                 batch_size=x.shape[0],
+                #                                 n_classes=n_class)
                 # image embeddings
                 new_img_embeddings = rearrange(new_img_embeddings,
                                                '(n_classes batch_size) dim H W -> n_classes batch_size dim H W', 
@@ -407,18 +417,30 @@ class SAM2ImageTrainer(pl.LightningModule):
                 # calculate alignment losses
                 # for text embeddings
                 text_align_loss = torch.tensor(0., device=self.device)
-                text_embeddings = text_embeddings / text_embeddings.norm(dim=-1, keepdim=True)
-                for m in range(new_text_embeddings.shape[2]):
-                    text_align_loss_ = self.MSELoss(new_text_embeddings[:,:,m], text_embeddings[:,None].repeat(1, x.shape[0], 1))
+                # text_embeddings = text_embeddings / text_embeddings.norm(dim=-1, keepdim=True)
+                for m in range(new_text_embeddings.shape[1]):
+                    if self.align_loss_type == 'cos':
+                        text_align_loss_ = self.aLoss(new_text_embeddings[:,m], text_embeddings.repeat(x.shape[0], 1),
+                                                      torch.ones(new_text_embeddings.shape[0], device=new_text_embeddings.device))
+                    else:
+                        text_align_loss_ = self.aLoss(new_text_embeddings[:,m], text_embeddings.repeat(x.shape[0], 1))
                     text_align_loss += text_align_loss_
-                text_align_loss = text_align_loss/new_text_embeddings.shape[2]
+                text_align_loss = text_align_loss/new_text_embeddings.shape[1]
                 # for image embeddings
                 img_align_loss = torch.tensor(0., device=self.device)
                 for c in range(n_class):
                     new_img_embeddings_ = new_img_embeddings[c]
                     if new_img_embeddings_.shape[-1] != CLIP_FEAT_SIZE:
                         new_img_embeddings_ = F.interpolate(new_img_embeddings_, size=(CLIP_FEAT_SIZE, CLIP_FEAT_SIZE), mode='bilinear', align_corners=False)
-                    img_align_loss_ = self.MSELoss(new_img_embeddings_, clip_img_embeddings)
+                    new_img_embeddings_ = new_img_embeddings_.permute(0,2,3,1).reshape(-1,text_embeddings.shape[-1])
+                    if self.align_loss_type=='cos':
+                        img_align_loss_ = self.aLoss(new_img_embeddings_, 
+                                                     clip_img_embeddings,
+                                                     torch.ones(x.shape[0]*CLIP_FEAT_SIZE*CLIP_FEAT_SIZE, device=x.device))
+                    else:
+                        if self.align_loss_type=='kl':
+                            new_img_embeddings_ = F.log_softmax(new_img_embeddings_, dim=1)
+                        img_align_loss_ = self.aLoss(new_img_embeddings_, clip_img_embeddings)
                     img_align_loss += img_align_loss_
                 img_align_loss = img_align_loss/n_class
 
@@ -833,7 +855,7 @@ class SAM2ImageTrainer(pl.LightningModule):
             return masks, iou_predictions, precise_predictions, exist_predictions
     
     
-    def _set_loss_functions(self):
+    def _set_loss_functions(self, align_loss_type):
         # l1 loss
         self.L1Loss = nn.L1Loss(reduction='none')
         self.BCELoss_noreduce = nn.BCEWithLogitsLoss(reduction='none') 
@@ -862,7 +884,18 @@ class SAM2ImageTrainer(pl.LightningModule):
         
         # alignment loss
         if self.align_to_clip:
-            self.MSELoss = nn.MSELoss()
+            if align_loss_type=='mse':
+                self.aLoss = nn.MSELoss()
+            elif align_loss_type=='l1':
+                self.aLoss = nn.L1Loss()
+            elif align_loss_type=='kl':
+                self.aLoss = nn.KLDivLoss()
+            elif align_loss_type=='ce':
+                self.aLoss = nn.CrossEntropyLoss()
+            elif align_loss_type=='cos':
+                self.aLoss = nn.CosineEmbeddingLoss()
+            else:   
+                raise ValueError(f'Unknown alignment loss type: {align_loss_type}!')
 
         return
 
@@ -997,7 +1030,8 @@ class SAM2ImageTrainer(pl.LightningModule):
                     if weights is not None:
                         loss_ = loss_*weights
                     loss_ = loss_[mask].mean() 
-                loss = loss + loss_ # * n_classes
+                if self.use_binary_class_scale: loss_ = loss_ * n_classes
+                loss = loss + loss_
 
         # multi-class loss
         if self.use_multiclass_loss:
