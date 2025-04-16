@@ -89,12 +89,15 @@ class SAM2ImageTrainerFT(BaseTrainer):
         # self.ts_exist = []
         if args.ft_wpath is None or args.ft_wpath=='None':
             self._freeze_backbones() 
+            print('No pre-trained model is loaded. Training with originally pretrained SAM2 and DOFA.')
         else:
             self._load_model(args.ft_wpath)
             if args.freeze_backbones_only:
                 self._freeze_backbones()
+                print(f'Load pre-trained model from {args.ft_wpath}. Freeze backbones only!')
             else:
                 self._freeze_encoder()
+                print(f'Load pre-trained model from {args.ft_wpath}. Freeze the entire encoder!')
         
     
     def _load_model(self, checkpoint_path):

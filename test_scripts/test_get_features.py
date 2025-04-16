@@ -23,7 +23,7 @@ from dataset import DWOSMDataset, OpenEarthMapDataset, MultiSenGeDataset, Vaihin
 import albumentations as A
 
 
-N = 10
+N = 20
 
 def main():
     t0 = datetime.datetime.now().replace(microsecond=0)

@@ -213,6 +213,7 @@ class Hiera(nn.Module):
         dofa_unfix_weights: bool = False,
         dofa_wo_rgb: bool = False,  # whether to exclude RGB channels in dofa feature extraction
     ):
+        self.tmp = 0
         super().__init__()
 
         assert len(stages) == len(window_spec)
@@ -343,8 +344,15 @@ class Hiera(nn.Module):
         return outputs
 
     def forward_with_adaptor(self, x: torch.Tensor, wave_list: List[float] = None) -> List[torch.Tensor]:
-        inp = x
-        x = x[:, :3] # sam2 only uses RGB channels
+        if self.spectralfeat_tune:
+            inp = x
+            x = x[:, :3] # sam2 only uses RGB channels
+        else:
+            x = x[:, :3] # sam2 only uses RGB channels
+            inp = x
+        if self.tmp==0:
+            print(f"inp shape: {inp.shape}, x shape: {x.shape}")
+            self.tmp += 1
         if x.shape[-2:] != (self.sam2_img_size, self.sam2_img_size):
             x = F.interpolate(x[:, :3], size=(self.sam2_img_size, self.sam2_img_size), mode='bilinear', align_corners=False).contiguous()
         

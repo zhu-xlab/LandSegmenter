@@ -418,7 +418,7 @@ class PromptGenerator(nn.Module):
                 outputs[name] = output
             return hook
 
-        # Register hooks for the 1th, 4th, 22th, and 24th layers for vit-large
+        # Register hooks: [1,4,9,11] for base; [3,9,19,23] for large
         for oi in self.dofa_out_indices:
             self.dofa.blocks[oi].register_forward_hook(get_hook(f'block_{oi}'))
         

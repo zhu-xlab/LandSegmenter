@@ -18,7 +18,18 @@ test.ipynb
 notes.txt
 data
 *.sqsh
+ProxyCLIP/*
+ft_compare
 
 !entrypoint.sh
 !launch_docker.sh
 !build_image.sh
+*.npy
+
+# for comparison methods
+models
+utils_comp
+train_scripts/train_ft_compare.py
+tmp.ipynb
+
+check_text_embeddings

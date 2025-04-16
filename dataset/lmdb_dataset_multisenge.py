@@ -6,6 +6,7 @@ import lmdb
 from dataset.data_properties_sentinel import *
 
 BANDS_2A10 = {10: [2,1,0,3,4,5,6,7,8,9],  # 10 bands
+              9:  [2,1,0,3,4,5,6,8,9],  # 9 bands
               3:  [2,1,0],  # 3 bands
               }
 

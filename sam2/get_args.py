@@ -130,6 +130,36 @@ def get_args_fine_tune():
     return args
 
 
+def get_args_ov():
+    parser = argparse.ArgumentParser(description='Test Framework for OV')
+    # data settings
+    parser.add_argument('--test_dataset_names', nargs='*', type=str, default=['dw', 'osm', 'multisenge', 'loveda', 'nyc', 'potsdam'], help='Names of the datasets used for testing')
+    parser.add_argument('--test_batch_sizes', nargs='*', type=int, default=[30], help='Batch size for testing (len=1 or len(test_dataset_names))')
+
+    # model setting
+    parser.add_argument('--multiple_aux_decoder', type=int, default=1, help='Number of auxiliary decoders')
+    parser.add_argument('--test_max_threshold', type=float, default=-1)
+    parser.add_argument('--test_background_id', dest='test_bg_idx', type=int, default=0)
+
+    # proxy settings
+    parser.add_argument('--clip_type', type=str, default='openai', help='Type of CLIP model')
+    parser.add_argument('--clip_visual_type', type=str, default='ViT-B/16', help='Type of CLIP visual model')
+    parser.add_argument('--clip_slide_stride', type=int, default=112, help='Stride of cropping')
+    parser.add_argument('--clip_slide_crop', type=int, default=336, help='Size of crops')
+    parser.add_argument('--vfm_model', type=str, default='weak', help='Type of VFM model for proxyclip')
+    parser.add_argument('--weak_feature_type', dest='weak_feat_type', type=str, default='encoder_embed', choices=['encoder_embed', 'preout_embed'], help='Type of features of weak VFM model.')
+    # get common arguments
+    parser = get_common_args(parser)
+
+    # initialize arguments
+    args = parser.parse_args()
+
+    # computing environment parameters
+    args = get_device_info(args)
+
+    return args
+
+
 def get_common_args(parser):
     # saving directory
     parser.add_argument('--save_dir', type=str, default='Results_test', help='Directory to save the results')  
@@ -226,7 +256,7 @@ def set_log_files(args, w_unc=False):
                 dofa_active += 'woRGB'               
             args.gname = f'FT{expand_dim_tag}_dofa{args.dofa_type[4]}{dofa_active}{aux}'
     else:
-        args.gname = f'FT{expand_dim_tag}{aux}_woAd'
+        args.gname = f'FT{expand_dim_tag}_woAd{aux}'
 
     # training size
     subset = f'_sub{args.subset_proportion}' if args.subset_proportion<1 else ''

@@ -94,6 +94,14 @@ datasets_settings_test = {
         'input_size': 512,
     },
 
+
+    'potsdam256': {
+        'data_path': os.path.join(test_lmdb_dir, 'potsdam_p256_val.lmdb'),
+        'data_path_ft': os.path.join(ft_lmdb_dir, 'potsdam_p256_train.lmdb'),
+        'n_channels': 3,
+        'input_size': 256,
+    },
+
     'nyc': {
         'data_path': os.path.join(test_lmdb_dir, 'NYC_p288_test.lmdb'),
         'data_path_ft': os.path.join(ft_lmdb_dir, 'NYC_p288_train.lmdb'),
@@ -191,7 +199,7 @@ class_names = {
         3: ['developed low-intensity impervious area', 'built-up low-intensity impervious area'], # Developed, low intensity: 'areas with a mixture of constructed materials and vegetation. Impervious surfaces account for 20% to 49% percent of total cover. These areas most commonly include single-family housing units'],
         4: ['developed medium-intensity impervious area', 'built-up medium-intensity impervious area'], # Developed, medium intensity: 'areas with a mixture of constructed materials and vegetation. Impervious surfaces account for 50% to 79% of the total cover. These areas most commonly include single-family housing units'],
         5: ['developed high-intensity impervious area', 'built-up high-intensity impervious area'], # Developed high intensity: 'highly developed areas where people reside or work in high numbers. Examples include apartment complexes, row houses, and commercial/industrial. Impervious surfaces account for 80% to 100% of the total cover'],
-        6: ['barren land inclduing mine site, dump site and construction site', 'bare land inclduing mine site, dump site and construction site', 'rock, sand, clay and soil inclduing mine site, dump site and construction site'], # Barren land (rock or sand or clay): 'areas of bedrock, desert pavement, scarps, talus, slides, volcanic material, glacial debris, sand dunes, strip mines, gravel pits, and other accumulations of earthen material. Generally, vegetation accounts for less than 15% of total cover'],
+        6: ['barren land including mine site, dump site and construction site', 'bare land including mine site, dump site and construction site', 'rock, sand, clay and soil including mine site, dump site and construction site'], # Barren land (rock or sand or clay): 'areas of bedrock, desert pavement, scarps, talus, slides, volcanic material, glacial debris, sand dunes, strip mines, gravel pits, and other accumulations of earthen material. Generally, vegetation accounts for less than 15% of total cover'],
         7: ['deciduous forest and broadleaf forest', 'deciduous tree and broadleaf tree', 'deciduous wood and broadleaf wood'], # Deciduous forest: 'areas dominated by trees generally greater than 5 meters tall, and greater than 20% of total vegetation cover. More than 75% of the tree species shed foliage simultaneously in response to seasonal change'],
         8: ['evergreen forest and coniferous forest', 'evergreen tree and coniferous tree', 'coniferous wood and deciduous wood'], # Evergreen forest: 'areas dominated by trees generally greater than 5 meters tall, and greater than 20% of total vegetation cover. More than 75% of the tree species maintain their leaves all year. Canopy is never without green foliage'],
         9: ['mixed broadleaf and coniferous forest', 'mixed deciduous and evergreen forest', 'mixed broadleaf and coniferous tree', 'mixed deciduous and evergreen tree', 'mixed broadleaf and coniferous wood', 'mixed deciduous and evergreen wood'], # Mixed forest: 'areas dominated by trees generally greater than 5 meters tall, and greater than 20% of total vegetation cover. Neither deciduous nor evergreen species are greater than 75% of total tree cover'],
@@ -310,8 +318,8 @@ class_names = {
     # },
 
     'nyc':{
-        0: ['tree', 'forest', 'wood'],
-        1: ['grass', 'herb', 'shrub', 'scrub'],
+        0: ['tree'], #], 'forest', 'wood'],
+        1: ['grass', 'herb'], #, 'shrub', 'scrub'],
         2: ['bare land', 'barren land', 'rock, sand, clay and soil'],
         3: ['water'],
         4: ['building'],
@@ -346,6 +354,7 @@ class_names = {
 
     'potsdam':{
         0: ['barren land', 'bare land', 'water', 'crop', 'agricultural land', 'rock, sand, clay and soil', 'wetland', 'ice and snow'], #'others except for grass, shrub, scrub, impervious area, car, building and tree'],
+        # 0: ['barren land', 'bare land', 'water', 'crop'],
         1: ['grass, shrub and scrub', 'herb', 'scrub', 'shrub', 'grass'],  # low vegetation
         2: ['road', 'transportation', 'impervious area except for building'], # ['impervious area'],  # impervious surfaces
         3: ['car'],  # car
@@ -408,6 +417,9 @@ class_names = {
     #     6: ['agricultural land', 'crop', 'crop land'],  # agricultural land
     # },
 }
+
+
+class_names['potsdam256'] = class_names['potsdam']
 
 
 class_weight_list = {

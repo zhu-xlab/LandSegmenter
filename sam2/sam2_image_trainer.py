@@ -342,7 +342,9 @@ class SAM2ImageTrainer(pl.LightningModule):
                 gamma = self.schdv[0]
                 if len(self.schdv)>1:
                     print(f'More values than one ({self.schdv}) are provided for exponential scheduler, only the first one ({gamma}) is used!')
-                scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma)
+                # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma)
+                lambda_func = lambda step: gamma**np.floor((step+1)/self.n_train_batches)
+                scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_func)
                 print(f'Initial LR (={self.lr}) is scheduled by {self.schdt} with gamma={gamma}.')
             return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step"},}
     

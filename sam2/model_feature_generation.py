@@ -108,10 +108,11 @@ class GenerateFeat():
         return y, y_exist, masks, iou_predictions, precise_predictions, existance_predictions
     
 
-    def predict_with_multiple_prompts(self, batch, return_embeddings=True):
+    def predict_with_multiple_prompts(self, batch, return_embeddings=True, imgs=None):
         # get data
         x, y, waves, y_exist, n_prompt, class_id_list, prompt_tokens, dataset_name = self._get_data_with_multiple_prompts(batch)
         num_cls = y_exist.shape[1]
+        if imgs is not None: x = imgs
 
         # prediction
         with torch.no_grad():

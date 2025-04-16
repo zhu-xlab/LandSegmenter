@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, ConcatDataset
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
-from train_scripts.get_args import get_args_train_w_unc as get_args
+from sam2.get_args import get_args_train_w_unc as get_args
 from sam2.sam2_image_w_auxDeUncXY_trainer import SAM2ImageTrainerAuxUnc
 from sam2.sam2_image_w_auxDeUncXYScaleW_trainer import SAM2ImageTrainerAuxUncScaleW
 from sam2.sam2_image_w_sepAuxDe4WeakUnc_trainer import SAM2ImageTrainerSepAuxDe4WeakUnc
