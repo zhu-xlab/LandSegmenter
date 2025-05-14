@@ -8,6 +8,7 @@ from typing import List, Optional, Tuple, Type
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from sam2.modeling.sam2_utils import LayerNorm2d, MLP
 
@@ -160,6 +161,8 @@ class MaskDecoder(nn.Module):
         repeat_image: bool = False,
         high_res_features: Optional[List[torch.Tensor]] = None,
         return_embeddings: bool = False,
+        use_mc_dropout: bool = False,
+        p_mc_dropout: float = 0.5,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Predict masks given image and prompt embeddings.
@@ -185,6 +188,8 @@ class MaskDecoder(nn.Module):
             repeat_image=repeat_image,
             high_res_features=high_res_features,
             return_embeddings=return_embeddings,
+            use_mc_dropout=use_mc_dropout,
+            p_mc_dropout=p_mc_dropout,
         )
         masks, iou_pred, precise_pred, exist_pred = outs[:4]
 
@@ -218,6 +223,8 @@ class MaskDecoder(nn.Module):
         repeat_image: bool,
         high_res_features: Optional[List[torch.Tensor]] = None,
         return_embeddings: bool = False,
+        use_mc_dropout: bool = False,
+        p_mc_dropout: float = 0.5,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Predicts masks. See 'forward' for more details."""
         # Concatenate output tokens
@@ -255,10 +262,10 @@ class MaskDecoder(nn.Module):
         # ------------------------------------------------------------------------------------------------
         # ------ option 1: adding noise_mask_embeddings to image embeddings without new key tpyes
         if self.use_opt_one:
-            hs, src = self.transformer(src, tokens) # (src, pos_src, tokens)
+            hs, src = self.transformer(src, tokens, use_mc_dropout=use_mc_dropout, p_mc_dropout=p_mc_dropout) # (src, pos_src, tokens)
         # ------ option 2: regard noise_mask_embeddings as another key type
         else:
-            hs, src = self.transformer(src, noise_mask_embeddings, tokens)
+            hs, src = self.transformer(src, noise_mask_embeddings, tokens, use_mc_dropout=use_mc_dropout, p_mc_dropout=p_mc_dropout)
         # ------------------------------------------------------------------------------------------------
         iou_token_out = hs[:, s, :]
         mask_tokens_out = hs[:, s + 1 : (s + 1 + self.num_mask_tokens), :]
@@ -271,10 +278,13 @@ class MaskDecoder(nn.Module):
             dc1, ln1, act1, dc2, act2 = self.output_upscaling
             feat_s0, feat_s1 = high_res_features
             upscaled_embedding = act1(ln1(dc1(src) + feat_s1))
+            if use_mc_dropout: F.dropout(upscaled_embedding, p=p_mc_dropout)
             upscaled_embedding = act2(dc2(upscaled_embedding) + feat_s0)
+            if use_mc_dropout: F.dropout(upscaled_embedding, p=p_mc_dropout)
 
         hyper_in_list: List[torch.Tensor] = []
         for i in range(self.num_mask_tokens):
+            ##### ? whether to use dropout here? maybe not?
             hyper_in_list.append(
                 self.output_hypernetworks_mlps[i](mask_tokens_out[:, i, :])
             )

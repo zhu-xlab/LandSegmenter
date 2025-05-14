@@ -148,6 +148,7 @@ def get_args_ov():
     parser.add_argument('--clip_slide_crop', type=int, default=336, help='Size of crops')
     parser.add_argument('--vfm_model', type=str, default='weak', help='Type of VFM model for proxyclip')
     parser.add_argument('--weak_feature_type', dest='weak_feat_type', type=str, default='encoder_embed', choices=['encoder_embed', 'preout_embed'], help='Type of features of weak VFM model.')
+    parser.add_argument('--max-confidence-threshold', dest='max_thr', type=float, default=0.6, help='Max confidence threshold for fusion.')
     # get common arguments
     parser = get_common_args(parser)
 
@@ -190,6 +191,7 @@ def get_common_args(parser):
     # parser.add_argument('--number_of_multiple_outputs', dest='n_mout', type=int, default=3, help='Number of multiple outputs')
     parser.add_argument('--use-noise-mask-loss', action='store_true', default=False, help='Whether to use the mask and eixstance mask on the branch where noise mask is used as input')
     parser.add_argument('--mute-adaptor', action='store_true', default=False, help='Whether to use adaptor or not')
+    parser.add_argument('--mute-high-frequency', dest='mute_highfreq', action='store_true', default=False, help='Whether to mute the high frequency component or not in the adapter')
     parser.add_argument('--dofa-type', type=str, default=None, choices=['vit_base_patch16', 'vit_large_patch16', 'None'], help='Type of DoFA model to use. Default is None (not using dofa).')
     parser.add_argument('--dofa-ckpt-path', type=str, default=None, help='Path to the checkpoint file (dofa)')
     parser.add_argument('--dofa-wo-rgb', action='store_true', default=False, help='Whether to use dofa to extract features from rgb or not')
@@ -214,6 +216,9 @@ def get_common_args(parser):
     parser.add_argument('--amp', action='store_false', default=True, help='Use mixed precision or not')
     parser.add_argument('--scheduler_type', dest='schdt', type=str, default='none', choices=['none','cos','step','exp'], help='Type of scheduler to use')
     parser.add_argument('--scheduler_values', dest='schdv', type=float, nargs='*', default=[], help='Values of scheduler to use (the epoch indexes for step scheduler; number of iterations for cosine scheduler)')
+    # dropout
+    parser.add_argument('--use_mc_dropout', action='store_true', default=False, help='Whether to use dropout for training')
+    parser.add_argument('--p_mc_dropout', type=float, default=0.5, help='Dropout rate for training')
     # wandb settings
     parser.add_argument('--project_name', dest='pjn', type=str, default='NLPR_SSL4EO', help='Name of the wandb project to record statistics.')
     parser.add_argument('--entity_name', dest='entity', type=str, default='vikki023', help='Name of the entity of wandb.')
@@ -243,8 +248,13 @@ def set_log_files(args, w_unc=False):
     # adaptor
     args.use_adaptor = not args.mute_adaptor
     if args.use_adaptor:
+        args.gname = f'FT{expand_dim_tag}'
+        # high-frequency option
+        if args.mute_highfreq:
+            args.gname += '_noHF'
+        # dofa option
         if args.dofa_type in [None, 'None']:
-            args.gname = f'FT{expand_dim_tag}{aux}'
+            args.gname += aux
         else:
             if args.dofa_unfix_weights:
                 dofa_active = 'A'
@@ -254,7 +264,7 @@ def set_log_files(args, w_unc=False):
                 dofa_active = ''    
             if args.dofa_wo_rgb:
                 dofa_active += 'woRGB'               
-            args.gname = f'FT{expand_dim_tag}_dofa{args.dofa_type[4]}{dofa_active}{aux}'
+            args.gname += f'_dofa{args.dofa_type[4]}{dofa_active}{aux}'
     else:
         args.gname = f'FT{expand_dim_tag}_woAd{aux}'
 
@@ -306,6 +316,9 @@ def set_log_files(args, w_unc=False):
     # feature normalization setting
     if args.use_feature_norm: 
         args.job_type += '_norm'
+    # dropout settings
+    if args.use_mc_dropout:
+        args.job_type += f'_drop{int(100*args.p_mc_dropout)}'
     # for uncertainty part
     if w_unc:
         args.gname += f'_unc{args.weak_weight_final}'

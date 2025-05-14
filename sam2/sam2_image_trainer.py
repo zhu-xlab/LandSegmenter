@@ -12,6 +12,7 @@ from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import torch
+import torchmetrics
 # from PIL.Image import Image
 from einops import rearrange
 
@@ -34,7 +35,7 @@ from sam2.utils.clip_visual_encoder import build_clip_vision_encoder
 from sam2.build_sam import build_sam2
 from sam2.modeling.text_simple_tokenizer import SimpleTokenizer
 
-from dataset.datasets_settings import class_names, class_weight_list    
+from dataset.datasets_settings import class_names, class_weight_list, datasets_settings_train   
 
 LOGIT_SCALE = 50
 FINAL_LR = 1e-6
@@ -76,7 +77,8 @@ class SAM2ImageTrainer(pl.LightningModule):
         super().__init__()
         # copnstruct sam2-based model (image encoder and prompt encoder weights are automatically fixed)
         use_dofa = (args.dofa_type not in [None, 'None']) 
-        hydra_overrides_extra = [f'++model.image_encoder.trunk.spectralfeat_tune={use_dofa}',
+        hydra_overrides_extra = [f'++model.image_encoder.trunk.handcrafted_tune={not args.mute_highfreq}',
+                                 f'++model.image_encoder.trunk.spectralfeat_tune={use_dofa}',
                                  f'++model.image_encoder.trunk.dofa_name={args.dofa_type}',
                                  f'++model.image_encoder.trunk.dofa_ckpt_path={args.dofa_ckpt_path}',
                                  f'++model.image_encoder.trunk.dofa_wo_rgb={args.dofa_wo_rgb}',
@@ -90,6 +92,9 @@ class SAM2ImageTrainer(pl.LightningModule):
         else:
             assert args.dofa_lr_scale==1, f'dofa_lr_scale={args.dofa_lr_scale}, but dofa_unfix_weights is False!'
         self.dofa_lr_scale = args.dofa_lr_scale
+        # dropout
+        self.use_mc_dropout = args.use_mc_dropout
+        self.p_mc_dropout = args.p_mc_dropout
         # logvar smoother
         self.use_logvar_smooth = args.use_logvar_smooth
         if args.use_logvar_smooth:
@@ -147,6 +152,22 @@ class SAM2ImageTrainer(pl.LightningModule):
             self.n_train_batches = int(args.n_batch_tr/args.ntasks)
         # display interval
         self.display_inv = args.display_inv
+        # training IoU dict for each dataset
+        self.train_ious = nn.ModuleDict()  # Instead of regular dict
+        for k in datasets_settings_train:
+            if k in MULTI_MASK_KEYS:
+                for subk in MULTI_MASK_KEYS[k]:
+                    self.train_ious[subk] = torchmetrics.JaccardIndex(
+                        task='multiclass', 
+                        num_classes=len(class_names[subk])+1,
+                        average=None
+                    )
+            else:
+                self.train_ious[k] = torchmetrics.JaccardIndex(
+                    task='multiclass', 
+                    num_classes=len(class_names[k])+1,
+                    average=None
+                )
 
         if args.test_only:
             self.test_use_multiple_prompts = args.test_use_multiple_prompts
@@ -189,7 +210,8 @@ class SAM2ImageTrainer(pl.LightningModule):
     
 
     def forward_decoder(self, img_feats, text_embeddings, n_classes, batch_size, use_aux=False, return_multiple=False, 
-                        one_no_noise_mask_embed=False, return_embeddings=False):
+                        one_no_noise_mask_embed=False, return_embeddings=False,
+                        use_mc_dropout = False, p_mc_dropout = 0.5):
         _, _, h, w = img_feats["image_embed"].shape   # [batch_size, 256, 16, 16]
         text_embeddings = self.model.sam_prompt_fn(text_embeddings) # [n_prompt, dim] n_prompt=512, dim=256
         # noise mask embeddings
@@ -218,7 +240,9 @@ class SAM2ImageTrainer(pl.LightningModule):
             n_classes, batch_size,
             high_res_key,
             return_multiple=return_multiple,
-            return_embeddings=return_embeddings)
+            return_embeddings=return_embeddings,
+            use_mc_dropout=use_mc_dropout, 
+            p_mc_dropout=p_mc_dropout)
         # parser outputs
         masks, iou_predictions, precise_predictions, exist_predictions = outs[:4]
         
@@ -381,7 +405,9 @@ class SAM2ImageTrainer(pl.LightningModule):
                 text_embeddings = self._get_text_embeddings(prompt_token)
 
             # prediction
-            outs = self.forward_decoder(img_feats, text_embeddings, n_class, x.shape[0], return_embeddings=self.align_to_clip)
+            outs = self.forward_decoder(img_feats, text_embeddings, n_class, x.shape[0], return_embeddings=self.align_to_clip,
+                                        use_mc_dropout=self.use_mc_dropout, p_mc_dropout=self.p_mc_dropout
+                                        )
             # parser outputs
             masks, iou_predictions, precise_predictions, exist_predictions = outs[:4]
             # check output shape
@@ -457,7 +483,29 @@ class SAM2ImageTrainer(pl.LightningModule):
             
             # losses.append(loss)
             loss = loss + loss_
-        
+
+            # dataset-wise loss logging
+            self.log(f'tr_loss_{name_key}', loss_, on_epoch=True, on_step=False, sync_dist=True) #, batch_size=x.shape[0])
+
+            # dataset-wise mIoU logging
+            preds = torch.argmax(masks, dim=1)
+            if MASK_CODE in y:
+                # Mask out ignored regions (if applicable)
+                y_masked = y.clone()
+                y_masked[y==MASK_CODE] = n_class
+                preds_masked = preds.clone()
+                preds_masked[y==MASK_CODE] = n_class
+                iou_per_class = self.train_ious[name_key](preds_masked, y_masked)
+            else:
+                iou_per_class = self.train_ious[name_key](preds, y)
+
+            # Exclude background (class 0) and compute mIoU
+            tr_ious = iou_per_class[:-1]  # Filter IoUs for non-background classes
+            mIoU = tr_ious.mean()  # Compute mean over remaining classes
+
+            # Logging
+            self.log(f'tr_mIoU_{name_key}', mIoU, on_step=False, on_epoch=True)
+
         # log loss
         self.log('tr_loss', loss, on_epoch=True, on_step=False, sync_dist=True) #, batch_size=x.shape[0])
         if self.align_to_clip:
@@ -795,7 +843,8 @@ class SAM2ImageTrainer(pl.LightningModule):
 
     def _pred_mask_and_iou(self, decoder, img_feats, text_embeddings, noise_mask_embeddings,
                            n_classes, batch_size, high_res_key='high_res_feats', 
-                           return_multiple=False, return_embeddings=False):
+                           return_multiple=False, return_embeddings=False,
+                           use_mc_dropout=False, p_mc_dropout=0.5):
         # rearrange text embeddings
         text_embeddings = rearrange(text_embeddings.unsqueeze(0).expand(batch_size, -1, -1),
                                     'batch_size n_classes dim -> (n_classes batch_size) dim', 
@@ -815,6 +864,8 @@ class SAM2ImageTrainer(pl.LightningModule):
             high_res_features=high_res_features,
             multimask_output=return_multiple,
             return_embeddings=return_embeddings,
+            use_mc_dropout=use_mc_dropout,
+            p_mc_dropout=p_mc_dropout,
         )
         masks, iou_predictions, precise_predictions, exist_predictions = outs[:4]
 
@@ -996,7 +1047,6 @@ class SAM2ImageTrainer(pl.LightningModule):
             pixel_weights_mean = mask.float()[:,0]*weights_list[1]
         else:
             weights = None
-
             
         for w, k in zip([self.wdice, self.wfocal, self.wce], ['dice', 'focal', 'bce']):
             if w>0:

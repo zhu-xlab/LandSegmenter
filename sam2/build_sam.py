@@ -133,6 +133,7 @@ def _load_checkpoint_test(model, ckpt_path):
         if missing_keys:
             raise RuntimeError("Found missing keys")
         # if unexpected_keys:
+        #     print(unexpected_keys)
         #     raise RuntimeError("Found unexpected keys")
         print("Loaded checkpoint sucessfully")
 

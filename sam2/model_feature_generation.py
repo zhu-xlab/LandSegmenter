@@ -40,7 +40,8 @@ class GenerateFeat():
 
     # copnstruct sam2-based model (image encoder and prompt encoder weights are automatically fixed)
         use_dofa = (args.dofa_type not in [None, 'None']) 
-        hydra_overrides_extra = [f'++model.image_encoder.trunk.spectralfeat_tune={use_dofa}',
+        hydra_overrides_extra = [f'++model.image_encoder.trunk.handcrafted_tune={not args.mute_highfreq}',
+                                 f'++model.image_encoder.trunk.spectralfeat_tune={use_dofa}',
                                  f'++model.image_encoder.trunk.dofa_name={args.dofa_type}',
                                  f'++model.image_encoder.trunk.dofa_ckpt_path={args.dofa_ckpt_path}',
                                  f'++model.image_encoder.trunk.dofa_wo_rgb={args.dofa_wo_rgb}',
@@ -163,7 +164,8 @@ class GenerateFeat():
     
     
     def forward_decoder(self, img_feats, text_embeddings, n_classes, batch_size, use_aux=False, return_multiple=False, 
-                        one_no_noise_mask_embed=False, return_embeddings=True):
+                        one_no_noise_mask_embed=False, return_embeddings=True, 
+                        use_mc_dropout = False, p_mc_dropout = 0.5):
         _, _, h, w = img_feats["image_embed"].shape   # [batch_size, 256, 16, 16]
         text_embeddings = self.model.sam_prompt_fn(text_embeddings) # [n_prompt, dim] n_prompt=512, dim=256
         # noise mask embeddings
@@ -192,7 +194,9 @@ class GenerateFeat():
             n_classes, batch_size,
             high_res_key,
             return_multiple=return_multiple,
-            return_embeddings=return_embeddings)
+            return_embeddings=return_embeddings,
+            use_mc_dropout=use_mc_dropout, 
+            p_mc_dropout=p_mc_dropout)
         # parser outputs
         masks, iou_predictions, precise_predictions, exist_predictions = outs[:4]
         
@@ -379,7 +383,8 @@ class GenerateFeat():
 
     def _pred_mask_and_iou(self, decoder, img_feats, text_embeddings, noise_mask_embeddings,
                            n_classes, batch_size, high_res_key='high_res_feats', 
-                           return_multiple=False, return_embeddings=False):
+                           return_multiple=False, return_embeddings=False,
+                           use_mc_dropout=False, p_mc_dropout=0.5):
         # rearrange text embeddings
         text_embeddings = rearrange(text_embeddings.unsqueeze(0).expand(batch_size, -1, -1),
                                     'batch_size n_classes dim -> (n_classes batch_size) dim', 
@@ -399,6 +404,8 @@ class GenerateFeat():
             high_res_features=high_res_features,
             multimask_output=return_multiple,
             return_embeddings=return_embeddings,
+            use_mc_dropout=use_mc_dropout,
+            p_mc_dropout=p_mc_dropout,
         )
         masks, iou_predictions, precise_predictions, exist_predictions = outs[:4]
 
