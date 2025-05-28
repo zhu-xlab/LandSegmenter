@@ -95,6 +95,8 @@ class TwoWayTransformer(nn.Module):
         # option 2: regard noise_mask_embeddings as another key type
         # image_pe: Tensor, # point_embedding: Tensor,
         text_embedding: Tensor,
+        use_mc_dropout: bool = False,
+        p_mc_dropout: float = 0.5,
     ) -> Tuple[Tensor, Tensor]:
         """
         Args:
@@ -134,13 +136,18 @@ class TwoWayTransformer(nn.Module):
                 # key_pe=image_pe,
                 # ------------------------------------------------------------------------------------------------
             )
+            if use_mc_dropout: 
+                queries = F.dropout(queries, p=p_mc_dropout)
+                keys = F.dropout(keys, p=p_mc_dropout)
 
         # Apply the final attention layer from the prompt to the image
         q = queries # + text_embedding # + point_embedding
         k = keys # + image_pe
         attn_out = self.final_attn_token_to_image(q=q, k=k, v=keys)
+        if use_mc_dropout: attn_out = F.dropout(attn_out, p=p_mc_dropout)
         queries = queries + attn_out
         queries = self.norm_final_attn(queries)
+        if use_mc_dropout: queries = F.dropout(queries, p=p_mc_dropout)
 
         return queries, keys
 

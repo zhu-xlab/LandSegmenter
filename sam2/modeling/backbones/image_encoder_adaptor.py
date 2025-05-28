@@ -405,6 +405,10 @@ class PromptGenerator(nn.Module):
                     else:
                         x, H, W = handcrafted_generator(x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous())
                     handcrafteds[str(i+1)] = x
+        else:
+            for i in range(len(self.stages)):
+                if str(i+1) in self.tuning_stage:
+                    handcrafteds[str(i+1)] = None
 
         return handcrafteds
     
@@ -486,11 +490,12 @@ class PromptGenerator(nn.Module):
             return handcrafted_feature, embedding_feature
 
     def get_prompt(self, x, prompt, block_num, depth_num):
+        i = 0 if self.handcrafted_tune else 1
         if isinstance(prompt[-1], torch.Tensor):
-            concat_prompt = torch.stack(prompt, dim=-1).sum(dim=-1)
+            concat_prompt = torch.stack(prompt[i:], dim=-1).sum(dim=-1)
             use_spectral = True
         else:
-            concat_prompt = torch.stack(prompt[:-1], dim=-1).sum(dim=-1)
+            concat_prompt = torch.stack(prompt[i:-1], dim=-1).sum(dim=-1)
             use_spectral = False
         feat = 0
         # B, H, W =  prompt[1].shape[0],  prompt[1].shape[1],  prompt[1].shape[2]
