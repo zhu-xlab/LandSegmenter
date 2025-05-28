@@ -1,0 +1,9 @@
+water
+tree; forest; wood
+grass; herb
+wetland 
+crop; agricultural land
+shrub; scrub
+built-up area; urban area; developed impervious area
+bare land; barren land;
+ice; snow

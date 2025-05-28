@@ -1,0 +1,14 @@
+built-up high-intensity impervious area
+built-up low-intensity impervious area
+industrial and commercial area
+artificial non-argricultural vegetation
+transportation; road
+arable land; herbaceous crop  
+vineyard
+orchard
+grass
+shrub; scrub
+forest; tree
+bare land; barren land; mine site
+wetland
+water

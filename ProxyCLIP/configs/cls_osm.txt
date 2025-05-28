@@ -1,0 +1,13 @@
+residential area
+arable land
+forest; tree
+industrial; commercial; transportation
+artificial vegetation; non-argricultural vegetation
+mine site; dump site; construction site
+pasture
+permanent crop
+water
+bare land; barren land
+shrub; herbaceous vegetation
+inland wetland
+coastal wetland

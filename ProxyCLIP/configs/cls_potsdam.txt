@@ -1,0 +1,6 @@
+clutter; background
+low vegetation; grass
+road; parking lot
+car
+building
+tree

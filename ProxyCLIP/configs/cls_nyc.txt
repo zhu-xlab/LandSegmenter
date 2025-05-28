@@ -1,0 +1,8 @@
+tree; forest
+grass; herb
+barren
+water
+building; roof
+road; transportation
+impervious area
+railway

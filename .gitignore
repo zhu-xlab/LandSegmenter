@@ -18,7 +18,9 @@ test.ipynb
 notes.txt
 data
 *.sqsh
-ProxyCLIP/*
+ProxyCLIP/checkpoints
+ProxyCLIP/datasets
+ProxyCLIP/images
 ft_compare
 
 !entrypoint.sh
@@ -27,9 +29,10 @@ ft_compare
 *.npy
 
 # for comparison methods
-models
-utils_comp
-train_scripts/train_ft_compare.py
+# models
+# utils_comp
+# train_scripts/train_ft_compare.py
+models/ckpts
 tmp.ipynb
 
 check_text_embeddings

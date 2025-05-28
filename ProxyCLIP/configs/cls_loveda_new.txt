@@ -1,0 +1,7 @@
+background; grass
+building; roof; house
+road
+water
+barren
+forest; tree
+agricultural; crop
