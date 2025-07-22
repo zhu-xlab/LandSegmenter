@@ -34,5 +34,6 @@ ft_compare
 # train_scripts/train_ft_compare.py
 models/ckpts
 tmp.ipynb
+tmp*
 
 check_text_embeddings

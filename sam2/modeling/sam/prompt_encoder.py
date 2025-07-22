@@ -247,17 +247,17 @@ class PromptEncoderCLIP(nn.Module):
         return mask
 
     def encode_text(self, text):
-        x = self.token_embedding(text).type(self.dtype)  # [n_class (n of text), n_ctx (context length, 77 by default), d_model]
+        x = self.token_embedding(text).type(self.dtype)  # [n_class (n of text), n_ctx (context length, 77 by default), d_model]  d_model = 512 for Base; 768 for Large
 
         x = x + self.positional_embedding.type(self.dtype)
-        x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer(x)
-        x = x.permute(1, 0, 2)  # LND -> NLD
+        # x = x.permute(1, 0, 2)  # NLD -> LND   # N = n_class, L = n_ctx, D = d_model   # for images: N->batch, L->H*W, D->C
+        x = self.transformer(x) #, attn_mask=self.attn_mask)
+        # x = x.permute(1, 0, 2)  # LND -> NLD
         x = self.ln_final(x).type(self.dtype)
 
         # x.shape = [batch_size, n_ctx, transformer.width]
         # take features from the eot embedding (eot_token is the highest number in each sequence)
-        x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)] @ self.text_projection
+        x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)] @ self.text_projection   # text.argmax(dim=-1): transfer L=77 to 1
 
         return x
 
@@ -287,11 +287,11 @@ class ResidualAttentionBlock(nn.Module):
     def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None):
         super().__init__()
 
-        self.attn = nn.MultiheadAttention(d_model, n_head)
+        self.attn = nn.MultiheadAttention(d_model, n_head, batch_first=True)
         self.ln_1 = LayerNorm(d_model)
         self.mlp = nn.Sequential(OrderedDict([
             ("c_fc", nn.Linear(d_model, d_model * 4)),
-            ("gelu", QuickGELU()),
+            ("gelu", nn.GELU()), #nn.GELU()), #QuickGELU()),    # by default, open clip uses GELU not QuickGELU 
             ("c_proj", nn.Linear(d_model * 4, d_model))
         ]))
         self.ln_2 = LayerNorm(d_model)

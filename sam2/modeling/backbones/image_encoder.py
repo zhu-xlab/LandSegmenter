@@ -29,7 +29,7 @@ class ImageEncoder(nn.Module):
     def forward(self, sample: torch.Tensor, wave_list: List[float] = None):
         # Forward through backbone
         features, pos = self.neck(self.trunk(sample, wave_list))
-        if self.scalp > 0:
+        if self.scalp > 1:  # revised the implementation to remove the output of the last block
             # Discard the lowest resolution features
             features, pos = features[: -self.scalp], pos[: -self.scalp]
 
@@ -101,17 +101,17 @@ class FpnNeck(nn.Module):
 
     def forward(self, xs: List[torch.Tensor]):
 
-        out = [None] * len(self.convs)
-        pos = [None] * len(self.convs)
-        assert len(xs) == len(self.convs)
+        out = [None] * (len(self.convs)-1)  # the last block of Hiera is discarded
+        pos = [None] * (len(self.convs)-1)  # the last block of Hiera is discarded
+        assert len(xs) == len(self.convs)-1
         # fpn forward pass
         # see https://github.com/facebookresearch/detectron2/blob/main/detectron2/modeling/backbone/fpn.py
         prev_features = None
         # forward in top-down order (from low to high resolution)
-        n = len(self.convs) - 1
+        n = len(self.convs) - 2 # the last block of Hiera is discarded
         for i in range(n, -1, -1):
             x = xs[i]
-            lateral_features = self.convs[n - i](x)
+            lateral_features = self.convs[n-i+1](x) # the last block of Hiera is discarded. the 1st conv is corresponding to the last Hiera block
             if i in self.fpn_top_down_levels and prev_features is not None:
                 top_down_features = F.interpolate(
                     prev_features.to(dtype=torch.float32),

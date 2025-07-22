@@ -50,6 +50,7 @@ TEXT_PREFIX = 'A photo of '
 CLIP_IMG_SIZE = 224
 CLIP_FEAT_SIZE = 224//32
 
+TEXT_TEMPLATE = 'a photo of {}.' # 'a remote sensing image of the {}.'
 
 ############################### FOR USFS LC ################################
 MULTI_MASK_KEYS = {'usfs': ['usfs-lc', 'usfs-lu'],
@@ -812,7 +813,8 @@ class SAM2ImageTrainer(pl.LightningModule):
         # generate prompt texts and reprepare labels
         nc_total = len(class_name_dict)
         n_prompt = nc_total
-        texts = [TEXT_PREFIX+class_name_dict[i] for i in range(nc_total)]
+        # texts = [TEXT_PREFIX+class_name_dict[i] for i in range(nc_total)]
+        texts = [TEXT_TEMPLATE.replace('{}', class_name_dict[i]) for i in range(nc_total)]
 
         # Tokenization of string inputs for the model
         if isinstance(texts, str):

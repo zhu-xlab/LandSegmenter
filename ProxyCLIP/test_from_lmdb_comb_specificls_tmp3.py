@@ -1,6 +1,7 @@
 import os 
 import time
 import datetime
+import openpyxl
 import numpy as np
 import h5py
 from PIL import Image
@@ -14,7 +15,7 @@ from tqdm import tqdm
 from proxyclip_segmentor import ProxyCLIPSegmentation
 
 import albumentations as A
-from dataset.datasets_settings import datasets_settings_test
+from dataset.datasets_settings import datasets_settings_test, class_names
 from dataset import DWOSMDataset, OpenEarthMapDataset, MultiSenGeDataset, VaihingenDataset, NYCDataset, LoveDADataset, PotsdamDataset
 from sam2.get_args import get_args_ov as get_args
 
@@ -22,8 +23,44 @@ from sam2.get_args import get_args_ov as get_args
 KEY_IMG = 'image'
 KEY_LBL = 'label'
 MASK_CODE = 255
-# dataset_name = 'potsdam'
-# cls_file = 'cls_potsdam'
+
+COLUMN_INDS = {0:'D1', 1:'E1', 2:'F1', 3:'G1', 4:'H1', 5:'I1', 6:'J1', 7:'K1', 8:'L1', 9:'M1', 10:'N1', 11:'O1', 12:'P1', 13:'Q1', 14:'R1', 15:'S1', 16:'T1',
+              17:'U1', 18:'V1', 19:'W1', 20:'X1', 21:'Y1', 22:'Z1'}
+
+def append_experiment_result(file_path, result):
+    try:
+        workbook = openpyxl.load_workbook(file_path)
+    except FileNotFoundError:
+        workbook = openpyxl.Workbook()
+
+    sheet = workbook.active
+
+    d = 0
+    if sheet['A1'].value is None:
+        sheet['A1'] = 'Dataset'
+        sheet['B1'] = 'Epoch'
+        sheet['C1'] = 'Model'
+        for i, name in enumerate(result['names']):
+            sheet[COLUMN_INDS[i+d]] = name
+        sheet[COLUMN_INDS[i+d+1]] = 'mIoU'
+        sheet[COLUMN_INDS[i+d+2]] = 'OA'
+
+    last_row = sheet.max_row+1
+
+    sheet.cell(row=last_row, column=1, value=result['Dataset'])
+    sheet.cell(row=last_row, column=2, value=result['Epoch'])
+    sheet.cell(row=last_row, column=3, value=result['Model'])
+    for i, iou in enumerate(result['IoUs']):
+        sheet.cell(row=last_row, column=4+d+i, value=iou)
+    sheet.cell(row=last_row, column=5+d+i, value=result['mIoU'])
+    sheet.cell(row=last_row, column=6+d+i, value=result['OA'])
+
+    workbook.save(file_path)
+
+def get_class_name_strings(dataset_name):
+    cls_dict = class_names[dataset_name]
+    name_list = [cls_dict[k][0] for k in cls_dict]
+    return name_list
 
 def calculate_acc_from_all(pred, gt, n_classes):
     ious = []
@@ -116,7 +153,9 @@ def main():
                 assert os.path.exists(args.pdir), f'Accuracy directory does not exist and cannot be created: {args.pdir}. Error: {inner_e}'
         ep = args.ts_wpath.split("epoch=")[-1].split("-")[0]
         # pred_fname = f'pred_OV_EP{ep}_{args.dataset_name}.npy'
-        pred_fname = f'pred_OV_weak_EP{ep}_{args.dataset_name}.h5'
+        # pred_fname = f'pred_OV_weak_EP{ep}_{args.dataset_name}.h5'
+        # test_save_path = os.path.join(args.pdir, pred_fname)
+        pred_fname = f'pred_OV_{args.dataset_name}.xlsx'
         test_save_path = os.path.join(args.pdir, pred_fname)
         
     # # load data
@@ -149,18 +188,20 @@ def main():
             y = batch[KEY_LBL].contiguous()
             # clip_prob = model.predict(x, batch, return_prob=True)
 
-            # 重置 CUDA 内存统计
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            torch.cuda.reset_peak_memory_stats(device)
+            # memory usage estimation
+            # # 重置 CUDA 内存统计
+            # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            # torch.cuda.reset_peak_memory_stats(device)
 
-            torch.cuda.synchronize()
-            tt1 = time.time()
+            # torch.cuda.synchronize()
+            # tt1 = time.time()
             weak_prob = model.get_weak_model_prediction(batch, return_prob=True)
-            torch.cuda.synchronize()
-            tt2 = time.time()
+            # torch.cuda.synchronize()
+            # tt2 = time.time()
 
-            peak_memory = torch.cuda.max_memory_allocated(device) / (1024 ** 2)  # 单位：MB
-            print(f"{i}-{(tt2-tt1)*1000}-{x.shape}-Peak memory usage during inference: {peak_memory:.2f} MB")
+            # peak_memory = torch.cuda.max_memory_allocated(device) / (1024 ** 2)  # 单位：MB
+            # print(f"{i}-{(tt2-tt1)*1000}-{x.shape}-Peak memory usage during inference: {peak_memory:.2f} MB")
+            
             # # # # # # uneven combination
             # seg_pred = (clip_prob+weak_prob)/2
             # weak_prob_max = weak_prob.max(-1)[0].max(-1)[0][:,:,None,None]
@@ -219,9 +260,19 @@ def main():
                 acc_print = np.round(acc, 4)
                 print(f'{args.dataset_name} | {name} | {ep} | {acc_print}')
             # print(dataset_name, accs)
-            np.save(test_save_path, accs)
+            # np.save(test_save_path, accs)
             # np.save('preds.npy', preds[:10])
             # np.save('ys.npy', ys[:10])
+            for m, a in zip(['weak'], accs):
+                results = {'Dataset': args.dataset_name,
+                           'Epoch': ep,
+                           'Model': m,
+                           'mIoU': f'{a[-2]*100:.2f}',
+                           'OA': f'{a[-1]*100:.2f}',
+                           'IoUs': [f'{i*100:.2f}' for i in a[:-2]],
+                           'names': get_class_name_strings(args.dataset_name),
+                           }
+                append_experiment_result(test_save_path, results)
         except Exception as e:
             raise NotImplementedError(e)
 
