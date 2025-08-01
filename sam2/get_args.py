@@ -15,6 +15,12 @@ def get_args_1st_stage_train():
     parser.add_argument('--subset_proportion', type=float, default=1, help='Proportion of the dataset used for training')
     parser.add_argument('--max_dataset_size', type=int, default=None, help='Maximum number of samples used for training')
 
+    # label smooth
+    parser.add_argument('--label-smooth-type', dest='lbl_smt_type', type=str, choices=['none', 'text', 'normal'], default='none', help='Type of distribution information used in label smoothing.')
+    parser.add_argument('--label-smooth-weight', dest='lbl_smt_w', type=float, default=0, help='Weight of the smoothed distribution in label smoothing.')
+    parser.add_argument('--label-smooth-average-prior-weight', dest='lbl_smt_wavg', type=float, default=0, help='Weight of the distribution based on averaged similarities when generating final label smooth distribution when label-smooth-type=text.')
+    parser.add_argument('--label-smooth-temperature', dest='lbl_smt_t', type=float, default=1, help='Temperature used to smooth the similarity in softmax.')
+
     # get common arguments
     parser = get_common_args(parser)
 
@@ -25,7 +31,7 @@ def get_args_1st_stage_train():
     args = get_device_info(args)
 
     # set saving dir
-    args = set_log_files(args)
+    args = set_log_files(args, lbl_smt_type=args.lbl_smt_type)
 
     return args
 
@@ -236,7 +242,7 @@ def get_common_args(parser):
     return parser
 
 
-def set_log_files(args, w_unc=False):
+def set_log_files(args, w_unc=False, lbl_smt_type='none'):
     expand_dim_tag = 'E' if args.de_expand_dim else ''
     # group name
     noise_mask_loss_tag = 'l' if args.use_noise_mask_loss else ''
@@ -289,6 +295,13 @@ def set_log_files(args, w_unc=False):
     # alignment settings
     if args.align_to_clip:
         args.gname += f'_a{args.clip_model_type}_{args.align_loss_type}'
+    
+    # label smooth settings
+    if lbl_smt_type != 'none':
+        args.gname += f'_{args.lbl_smt_w}{lbl_smt_type[0]}'
+        if lbl_smt_type=='text':
+            if args.lbl_smt_wavg>0: args.gname += f'{args.lbl_smt_wavg}'
+            args.gname += f'T{args.lbl_smt_t}'
         
     # job type
     args.job_type = f'{int(args.wfocal)}F_{int(args.wdice)}D_{int(args.wce)}C' 

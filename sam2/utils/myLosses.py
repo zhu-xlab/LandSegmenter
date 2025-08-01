@@ -92,18 +92,24 @@ class SoftDiceLoss(_Loss):
                     y_true = y_true * mask
 
             if self.mode == MULTICLASS_MODE:
-                y_true = y_true.view(bs, -1)
-                y_pred = y_pred.view(bs, num_classes, -1)
-
-                if self.ignore_index is not None:
-                    mask = y_true != self.ignore_index
-                    y_pred = y_pred * mask.unsqueeze(1)
-
-                    y_true = F.one_hot((y_true * mask).to(torch.long), num_classes)  # N,H*W -> N,H*W, C
-                    y_true = y_true.permute(0, 2, 1) * mask.unsqueeze(1)  # N, C, H*W
+                if y_true.shape == y_pred.shape:
+                    y_true = y_true.view(bs, num_classes, -1)
+                    y_pred = y_pred.view(bs, num_classes, -1)
+                    if self.ignore_index is not None:
+                        y_true = y_true*(y_true!=self.ignore_index)
                 else:
-                    y_true = F.one_hot(y_true, num_classes)  # N,H*W -> N,H*W, C
-                    y_true = y_true.permute(0, 2, 1)  # N, C, H*W
+                    y_true = y_true.view(bs, -1)
+                    y_pred = y_pred.view(bs, num_classes, -1)
+
+                    if self.ignore_index is not None:
+                        mask = y_true != self.ignore_index
+                        y_pred = y_pred * mask.unsqueeze(1)
+
+                        y_true = F.one_hot((y_true * mask).to(torch.long), num_classes)  # N,H*W -> N,H*W, C
+                        y_true = y_true.permute(0, 2, 1) * mask.unsqueeze(1)  # N, C, H*W
+                    else:
+                        y_true = F.one_hot(y_true, num_classes)  # N,H*W -> N,H*W, C
+                        y_true = y_true.permute(0, 2, 1)  # N, C, H*W
 
             if self.mode == MULTILABEL_MODE:
                 y_true = y_true.view(bs, num_classes, -1)

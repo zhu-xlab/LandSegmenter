@@ -187,7 +187,13 @@ class SAM2ImageTrainer(pl.LightningModule):
 
             # test mode
             self.save_acc_only = True if self.test_save_path.endswith('.npy') else False
-            
+
+
+    def on_fit_start(self):
+        # Shift current_epoch only when resuming from checkpoint, otherwise the resumed epoch will be counted as the first epoch and get retrained
+        if self.trainer.ckpt_path is not None and self.trainer.fit_loop.epoch_progress.current.completed > 0:
+            self.trainer.fit_loop.epoch_progress.current.completed += 1        
+
 
     # ------ forward propogation ------ #
     def forward(self, x, prompt, waves=None, use_aux=False, return_embeddings=False):  # text prompt: here is the tokenized tensor
