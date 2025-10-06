@@ -243,7 +243,7 @@ def main():
                 accs_ = np.array(ts_iou_all+[ts_oa])
                 accs.append(accs_)
             accs = np.array(accs)
-            for acc, name in zip(accs, ['clip', 'weak', 'ovc ']):
+            for acc, name in zip(accs, ['clip', 'weak', 'ovc']):
                 acc_print = np.round(acc, 4)
                 print(f'{args.dataset_name} | {name} | {acc_print}')
             # print(dataset_name, accs)

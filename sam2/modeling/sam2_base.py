@@ -39,6 +39,8 @@ class SAM2Base(torch.nn.Module):
         decoder_expand_dim: bool = False,
         decoder_use_opt_two: bool = False,
         decoder_use_feature_norm: bool = False,
+        aux_decoder_share_embedding: bool = False,
+        use_separate_prompt_fn: bool = False,
     ):
         super().__init__()
 
@@ -46,6 +48,10 @@ class SAM2Base(torch.nn.Module):
         self.image_encoder = image_encoder
         # auxiliary decoder for co-teaching
         self.use_auxiliary_decoder = use_auxiliary_decoder
+        if self.use_auxiliary_decoder==1 and aux_decoder_share_embedding:
+            self.one_no_noise_mask_embed = True
+        else:
+            self.one_no_noise_mask_embed = False 
         # Use level 0, 1, 2 for high-res setting, or just level 2 for the default setting
         self.use_high_res_features_in_sam = use_high_res_features_in_sam
         self.num_feature_levels = 3 if use_high_res_features_in_sam else 1
@@ -59,6 +65,7 @@ class SAM2Base(torch.nn.Module):
         self.image_size = image_size
         self.backbone_stride = backbone_stride
         self.sam_mask_decoder_extra_args = sam_mask_decoder_extra_args
+        self.use_sam_prompt_fn_aux = use_separate_prompt_fn
 
         self._build_sam_heads(decoder_expand_dim, decoder_use_opt_two, decoder_use_feature_norm)
         
@@ -135,7 +142,7 @@ class SAM2Base(torch.nn.Module):
         )
         self.no_noise_mask_embed = nn.Embedding(1, self.hidden_dim)
 
-        # for co-teaching
+        # constructing auxiliary decoder(s)
         if self.use_auxiliary_decoder==1:
             self.sam_mask_decoder_aux = MaskDecoder(
                 num_multimask_outputs=NUM_MULTIOUTPUTS,
@@ -155,6 +162,9 @@ class SAM2Base(torch.nn.Module):
                 use_feature_norm=decoder_use_feature_norm,
                 **(self.sam_mask_decoder_extra_args or {}),
             )
+            # for prompt embedding projection
+            if self.use_sam_prompt_fn_aux:
+                self.sam_prompt_fn_aux = torch.nn.Linear(clip_embed_dim, self.sam_prompt_embed_dim, bias=True)
             # for noise mask quality prediction
             self.sam_noise_mask_downscaling_aux = nn.Sequential(
                 nn.Conv2d(1, self.noise_mask_in_chans // 4, kernel_size=2, stride=2),
@@ -165,7 +175,8 @@ class SAM2Base(torch.nn.Module):
                 nn.GELU(),
                 nn.Conv2d(self.noise_mask_in_chans, self.hidden_dim, kernel_size=1),
             )
-            self.no_noise_mask_embed_aux = nn.Embedding(1, self.hidden_dim)
+            if not self.one_no_noise_mask_embed:
+                self.no_noise_mask_embed_aux = nn.Embedding(1, self.hidden_dim)
         elif self.use_auxiliary_decoder>1:
             for i in range(self.use_auxiliary_decoder):
                 sam_mask_decoder_aux = MaskDecoder(
@@ -187,6 +198,10 @@ class SAM2Base(torch.nn.Module):
                     **(self.sam_mask_decoder_extra_args or {}),
                 )
                 setattr(self, f'sam_mask_decoder_aux_{i}', sam_mask_decoder_aux)
+                # for prompt embedding projection
+                if self.use_sam_prompt_fn_aux:
+                    sam_prompt_fn_aux = torch.nn.Linear(clip_embed_dim, self.sam_prompt_embed_dim, bias=True)
+                    setattr(self, f'sam_prompt_fn_aux_{i}', sam_prompt_fn_aux)
                 # for noise mask quality prediction
                 sam_noise_mask_downscaling_aux = nn.Sequential(
                     nn.Conv2d(1, self.noise_mask_in_chans // 4, kernel_size=2, stride=2),

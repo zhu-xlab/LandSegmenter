@@ -252,15 +252,14 @@ class PromptGenerator(nn.Module):
           
         if self.embedding_tune:
             for i in range(len(self.stages)):
-                if str(i+1) in self.tuning_stage:
-                    embedding_generator = nn.Linear(self.embed_dims[i], self.embed_dims[i] // self.scale_factor)
-                    setattr(self, f'embedding_generator_{i+1}', embedding_generator)
-                    # attention module
-                    embedding_attention = FAM(self.embed_dims[i]//self.scale_factor, self.scale_factor,
-                                            channels_combine=self.embed_dims[i]//self.scale_factor)
-                    setattr(self, f'embedding_attention_{i+1}', embedding_attention)
-                    embedding_pam = PAM()
-                    setattr(self, f'embedding_pam_{i+1}', embedding_pam)
+                embedding_generator = nn.Linear(self.embed_dims[i], self.embed_dims[i] // self.scale_factor)
+                setattr(self, f'embedding_generator_{i+1}', embedding_generator)
+                # attention module
+                embedding_attention = FAM(self.embed_dims[i]//self.scale_factor, self.scale_factor,
+                                          channels_combine=self.embed_dims[i]//self.scale_factor)
+                setattr(self, f'embedding_attention_{i+1}', embedding_attention)
+                embedding_pam = PAM()
+                setattr(self, f'embedding_pam_{i+1}', embedding_pam)
                
         if self.spectralfeat_tune:
             # list used to record the final dimension of each stage
@@ -269,29 +268,28 @@ class PromptGenerator(nn.Module):
             assert os.path.exists(dofa_ckpt_path), f"DOFA checkpoint path {dofa_ckpt_path} does not exist!"
             self.dofa_patch_size = 16
             self.dofa_name = dofa_name
-            self.dofa_out_indices = [1,4,11] if 'base' in dofa_name else [3,9,23] # [1,4,9,11] if 'base' in dofa_name else [3,9,19,23]
+            self.dofa_out_indices = [1,4,9,11] if 'base' in dofa_name else [3,9,19,23]
             # self.dofa_out_indices = [2,5,8,11]  # [0,3,21,23] (old for large); [2,5,8,11] for base
             self.dofa = self._build_spectral_encoder()
             # build spectral feature generators
             for i in range(len(self.stages)):
-                if str(i+1) in self.tuning_stage:
-                    final_d = self.embed_dims[i] // self.scale_factor
-                    self.final_ds.append(final_d)
-                    r = math.pow(self.dofa.embed_dim/final_d,1/3)
-                    spectralfeat_generator = nn.Sequential(
-                        nn.Linear(self.dofa.embed_dim, int(final_d*r**2)),
-                        nn.GELU(),
-                        nn.Linear(int(final_d*r**2), int(final_d*r)),
-                        nn.GELU(),
-                        nn.Linear(int(final_d*r), final_d)
-                    )
-                    setattr(self, f'spectralfeat_generator_{i+1}', spectralfeat_generator)
-                    # attention module
-                    spectralfeat_attention = FAM(final_d, self.scale_factor,
-                                                channels_combine=final_d)
-                    setattr(self, f'spectralfeat_attention_{i+1}', spectralfeat_attention)
-                    spectralfeat_pam = PAM()
-                    setattr(self, f'spectralfeat_pam_{i+1}', spectralfeat_pam)
+                final_d = self.embed_dims[i] // self.scale_factor
+                self.final_ds.append(final_d)
+                r = math.pow(self.dofa.embed_dim/final_d,1/3)
+                spectralfeat_generator = nn.Sequential(
+                    nn.Linear(self.dofa.embed_dim, int(final_d*r**2)),
+                    nn.GELU(),
+                    nn.Linear(int(final_d*r**2), int(final_d*r)),
+                    nn.GELU(),
+                    nn.Linear(int(final_d*r), final_d)
+                )
+                setattr(self, f'spectralfeat_generator_{i+1}', spectralfeat_generator)
+                # attention module
+                spectralfeat_attention = FAM(final_d, self.scale_factor,
+                                             channels_combine=final_d)
+                setattr(self, f'spectralfeat_attention_{i+1}', spectralfeat_attention)
+                spectralfeat_pam = PAM()
+                setattr(self, f'spectralfeat_pam_{i+1}', spectralfeat_pam)
 
         if self.adaptor == 'adaptor':
             for i in range(len(self.stages)):
@@ -360,7 +358,7 @@ class PromptGenerator(nn.Module):
         return model
     
     def _load_spectral_encoder_checkpoint(self, dofa_ckpt_path, dofa_unfix_weights):
-        checkpoint = torch.load(dofa_ckpt_path, map_location=torch.device('cpu'))
+        checkpoint = torch.load(dofa_ckpt_path, map_location=torch.device('cpu'), weights_only=True)
         missing_keys, _ = self.dofa.load_state_dict(checkpoint, strict=False)
         if missing_keys:
             raise ValueError(f"Missing keys in loading DOFA: {missing_keys}")

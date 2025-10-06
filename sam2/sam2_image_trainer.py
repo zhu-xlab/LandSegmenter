@@ -169,6 +169,8 @@ class SAM2ImageTrainer(pl.LightningModule):
                     num_classes=len(class_names[k])+1,
                     average=None
                 )
+        
+        self.mute_exist_loss = getattr(args, 'mute_exist_loss', False)
 
         if args.test_only:
             self.test_use_multiple_prompts = args.test_use_multiple_prompts
@@ -188,11 +190,14 @@ class SAM2ImageTrainer(pl.LightningModule):
             # test mode
             self.save_acc_only = True if self.test_save_path.endswith('.npy') else False
 
-
     def on_fit_start(self):
         # Shift current_epoch only when resuming from checkpoint, otherwise the resumed epoch will be counted as the first epoch and get retrained
         if self.trainer.ckpt_path is not None and self.trainer.fit_loop.epoch_progress.current.completed > 0:
             self.trainer.fit_loop.epoch_progress.current.completed += 1        
+
+    def printr(self, out_text):
+        if self.trainer.global_rank==0:
+            print(out_text)
 
 
     # ------ forward propogation ------ #
@@ -422,10 +427,13 @@ class SAM2ImageTrainer(pl.LightningModule):
                 masks = F.interpolate(masks, size=y.shape[-2:], mode='bilinear', align_corners=False)
         
             # prediction accuracies
-            if if_weak_lbl:
-                precises, ious =  None, None
+            if self.mute_exist_loss:
+                y_exist, precises, ious = None, None, None
             else:
-                precises, ious = self._get_accs(masks.detach(), y)
+                if if_weak_lbl:
+                    precises, ious = None, None
+                else:
+                    precises, ious = self._get_accs(masks.detach(), y)
         
             # calculate segmentation and classification losses 
             class_weights = self.class_weight_tensors[name_key] if self.use_class_weights else None
@@ -684,7 +692,7 @@ class SAM2ImageTrainer(pl.LightningModule):
 
 
     # ------ Model utilities ------ #
-    def _get_data(self, batch, return_single=True):
+    def _get_data(self, batch, return_single=True, fine_tune=False):
         x = batch[KEY_IMG].contiguous()
         y = batch[KEY_LBL].contiguous()
         if return_single:
@@ -696,7 +704,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         ys, y_exists, n_classes, prompt_tokens = [], [], [], []
         for ki, key in enumerate(cls_name_keys):
             cls_all = class_names[key]
-            if self.trainer.training:
+            if self.trainer.training and not fine_tune:
                 CLS_DICT = {i:random.choice(cls_all[i]) for i in cls_all}
             else:
                 CLS_DICT = {i:cls_all[i][0] for i in cls_all}
@@ -708,7 +716,7 @@ class SAM2ImageTrainer(pl.LightningModule):
                 y_exist[:,i] = (ye_>0).to(y_exist.dtype)
             
             # prepare prompt
-            prompt_tokens_, n_classes_ = self._prepare_prompt(CLS_DICT, y)
+            prompt_tokens_, n_classes_ = self._prepare_prompt(CLS_DICT)
             
             # append
             ys.append(y_)
@@ -749,7 +757,7 @@ class SAM2ImageTrainer(pl.LightningModule):
             y_exist[:,i] = (ye_>0).to(y_exist.dtype)
         
         # prepare prompt
-        prompt_tokens, n_prompt = self._prepare_prompt(CLS_DICT, y)
+        prompt_tokens, n_prompt = self._prepare_prompt(CLS_DICT)
         
         return x, y, waves, y_exist, n_prompt, class_id_list, prompt_tokens, dataset_name
 
@@ -811,7 +819,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         return features
     
 
-    def _prepare_prompt(self, class_name_dict, lbl):
+    def _prepare_prompt(self, class_name_dict):
         """ Tokenization of string inputs for the model. """
         truncate = False
         context_length = self.model.sam_prompt_encoder.context_length
@@ -829,7 +837,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         sot_token = self.tokenizer.encoder["<|startoftext|>"]
         eot_token = self.tokenizer.encoder["<|endoftext|>"]
         all_tokens = [[sot_token] + self.tokenizer.encode(text) + [eot_token] for text in texts]
-        result = torch.zeros(len(all_tokens), context_length, dtype=torch.long, device=lbl.device)
+        result = torch.zeros(len(all_tokens), context_length, dtype=torch.long, device=self.device)
 
         for i, tokens in enumerate(all_tokens):
             if len(tokens) > context_length:
@@ -838,7 +846,7 @@ class SAM2ImageTrainer(pl.LightningModule):
                     tokens[-1] = eot_token
                 else:
                     raise RuntimeError(f"Input {texts[i]} is too long for context length {context_length}")
-            result[i, :len(tokens)] = torch.tensor(tokens, device=lbl.device)
+            result[i, :len(tokens)] = torch.tensor(tokens, device=self.device)
 
         return result, n_prompt
     
@@ -983,7 +991,7 @@ class SAM2ImageTrainer(pl.LightningModule):
         return acc
     
 
-    def _log_imgs(self, prefix, x, mask, y):
+    def _log_imgs(self, prefix, x, mask, y, noisy_mask=None, n_data_split=2):
         n_classes = mask.shape[0]
         if n_classes==1:
             mask = (mask[0].detach().cpu().numpy()>0.5).astype(np.uint8)
@@ -998,6 +1006,13 @@ class SAM2ImageTrainer(pl.LightningModule):
         masks={'prediction':   {'mask_data': mask, 'class_labels': class_labels},
                'ground truth': {'mask_data': y.detach().cpu().numpy(), 'class_labels': class_labels}
                 }
+        if noisy_mask is not None:
+            assert n_data_split in [2,3], f'n_data_split should be 2 or 3, but got {n_data_split}!'
+            noisy_mask = noisy_mask.detach().cpu().numpy().astype(np.uint8)
+            class_labels_noisy = {1: "clean", 2: "noisy"}
+            if n_data_split==3:
+                class_labels_noisy[3] = "ambiguous"
+            masks['noisy'] = {'mask_data': noisy_mask, 'class_labels': class_labels_noisy}
         # get rgb img
         # x = F.interpolate(x.unsqueeze(0), size=(256,256), mode='bilinear', align_corners=False).squeeze(0)
         if x.shape[0]==3:

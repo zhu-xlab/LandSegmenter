@@ -202,7 +202,7 @@ class Hiera(nn.Module):
         scale_factor: int = 32,
         input_type: str = 'fft',       
         prompt_type: str = 'highpass',   # prompt type for fft
-        tuning_stage: str = "123",
+        tuning_stage: str = "1234",
         freq_nums: float = 0.25,
         handcrafted_tune: bool = True,
         embedding_tune: bool = True,
@@ -256,7 +256,6 @@ class Hiera(nn.Module):
         if self.adaptor is not None:
             self.adaptor_stage_starts = [0] + \
                 [sum(stages[:i])+1 for i in range(1,len(stages))]
-            self.adaptor_stage_starts = self.adaptor_stage_starts[:len(tuning_stage)]
             self.scale_factor = scale_factor
             self.prompt_type = prompt_type
             self.tuning_stage = tuning_stage
@@ -311,8 +310,6 @@ class Hiera(nn.Module):
             else [self.blocks[-1].dim_out]
         )
 
-        self.stage_ends = self.stage_ends[:-1]  # the last block is not used in SAM2
-
     def _get_pos_embed(self, hw: Tuple[int, int]) -> torch.Tensor:
         h, w = hw
         window_embed = self.pos_embed_window
@@ -342,10 +339,6 @@ class Hiera(nn.Module):
                 ):
                     feats = x.permute(0, 3, 1, 2)
                     outputs.append(feats)
-                
-                # skip the last block
-                if i == self.stage_ends[-1]:
-                    break
 
         return outputs
 
@@ -409,10 +402,6 @@ class Hiera(nn.Module):
             ):
                 feats = x.permute(0, 3, 1, 2)
                 outputs.append(feats)
-            
-            # skip the last block
-            if i == self.stage_ends[-1]:
-                break
 
         return outputs
 

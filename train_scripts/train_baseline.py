@@ -15,9 +15,8 @@ from torch.utils.data import DataLoader, ConcatDataset
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
-from sam2.get_args import get_args_1st_stage_train as get_args
+from sam2.get_args import get_args_train_baseline as get_args
 from sam2.sam2_image_trainer import SAM2ImageTrainer
-from sam2.sam2_image_trainer_ls import SAM2ImageTrainerLS
 from sam2.sam2_image_w_auxDe_trainer import SAM2ImageTrainerAux
 from sam2.sam2_image_w_sepAuxDe4Weak_trainer import SAM2ImageTrainerSepAuxDe4Weak
 
@@ -112,9 +111,9 @@ def main():
         train_loader = MyDataModule(max_dataset_size=args.max_dataset_size, batch_size=args.bs, num_workers=args.num_workers)
         # batch number
         if args.max_dataset_size is None:
-            batch_nums = [int(len(ds)*ss//args.bs) for ds, ss in zip(datasets_tr[0],datasets_tr[1])]
+            batch_nums = [len(ds)//args.bs for ds in datasets_tr[0]]
         else:
-            batch_nums = [int(min(len(ds), args.max_dataset_size)*ss//args.bs) for ds, ss in zip(datasets_tr[0],datasets_tr[1])]
+            batch_nums = [min(len(ds), args.max_dataset_size)//args.bs for ds in datasets_tr[0]]
         total_batch_num = sum(batch_nums)
         batch_num = (total_batch_num // args.ntasks) * (args.ntasks)
         # print(batch_nums, total_batch_num, args.ntasks, batch_num)
@@ -135,8 +134,6 @@ def main():
         model = SAM2ImageTrainerSepAuxDe4Weak(args)
     elif args.use_aux_decoder:
         model = SAM2ImageTrainerAux(args)
-    elif args.lbl_smt_type != 'none':
-        model = SAM2ImageTrainerLS(args)
     else:
         model = SAM2ImageTrainer(args)
     
@@ -146,7 +143,7 @@ def main():
     callbacks = [ModelCheckpoint(dirpath = args.checkpoints_dir, every_n_epochs = args.save_inv, 
                                 #  save_weights_only=True, filename='model_{epoch:02d}_{val_loss:.2f}',
                                  save_top_k=-1,  # Save all models
-                                 save_last=True 
+                                 save_last=False,  # Do not save the last model separately 
                                  )]
     if args.schdt!='none': callbacks += [LearningRateMonitor(logging_interval='epoch')]
     trainer = pl.Trainer(accelerator=args.accelerator,
@@ -171,7 +168,7 @@ def main():
     # trainer.test(model, dataloaders=test_loader, verbose=True)
     
     t1 = datetime.datetime.now().replace(microsecond=0)
-    print(f'Training is finished|Total spent time:{t1-t0}!' )
+    print(f'Training is finished|Total spent time:{t1-t0}!')
     
     
     

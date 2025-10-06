@@ -7,7 +7,7 @@ import numpy as np
 from pathlib import Path
 
 
-def get_args_1st_stage_train():
+def get_args_train_baseline():
     parser = argparse.ArgumentParser(description='Train SAM2 with exact labels')
     # data settings
     parser.add_argument('--dataset_name', type=str, nargs='*', default=['dw', 'dynamicearthnet', 'openearthmap'], 
@@ -15,12 +15,8 @@ def get_args_1st_stage_train():
     parser.add_argument('--subset_proportion', type=float, default=1, help='Proportion of the dataset used for training')
     parser.add_argument('--max_dataset_size', type=int, default=None, help='Maximum number of samples used for training')
 
-    # label smooth
-    parser.add_argument('--label-smooth-type', dest='lbl_smt_type', type=str, choices=['none', 'text', 'normal'], default='none', help='Type of distribution information used in label smoothing.')
-    parser.add_argument('--label-smooth-weight', dest='lbl_smt_w', type=float, default=0, help='Weight of the smoothed distribution in label smoothing.')
-    parser.add_argument('--label-smooth-average-prior-weight', dest='lbl_smt_wavg', type=float, default=0, help='Weight of the distribution based on averaged similarities when generating final label smooth distribution when label-smooth-type=text.')
-    parser.add_argument('--label-smooth-temperature', dest='lbl_smt_t', type=float, default=1, help='Temperature used to smooth the similarity in softmax.')
-
+    parser.add_argument('--mute-exist-loss', action='store_true', default=False, help='Whether to mute existence loss')
+    
     # get common arguments
     parser = get_common_args(parser)
 
@@ -31,42 +27,7 @@ def get_args_1st_stage_train():
     args = get_device_info(args)
 
     # set saving dir
-    args = set_log_files(args, lbl_smt_type=args.lbl_smt_type)
-
-    return args
-
-def get_args_train_w_unc():
-    parser = argparse.ArgumentParser(description='Train SAM2 with exact labels')
-    # data settings
-    parser.add_argument('--dataset_name', type=str, nargs='*', default=['dw', 'dynamicearthnet', 'openearthmap'], 
-                        help='Names of the datasets used for training')
-    parser.add_argument('--subset_proportion', type=float, default=1, help='Proportion of the dataset used for training')
-    parser.add_argument('--max_dataset_size', type=int, default=None, help='Maximum number of samples used for training')
-
-    # uncertainty settings
-    parser.add_argument('--use_no_weak_labels_as_logvar_input', dest='no_weak_input', action='store_true', default=False, help='Whether to use weak labels as logvar input or not')
-    parser.add_argument('--weak_weight_rampup_end', type=int, default=100, help='Number of epochs for weak weight rampup')
-    parser.add_argument('--weak_weight_rampup_start', type=int, default=0, help='Number of epochs for weak weight rampup')
-    parser.add_argument('--weak_weight_final', type=float, default=1.0, help='Final weight of weak loss')
-    parser.add_argument('--weak_uncertainty_lambda', dest='weak_unc_lambda', type=float, default=1.0, help='Weight of weak uncertainty scale loss')
-    parser.add_argument('--weak_branch_with_detach_encoder', dest='weak_detach', action='store_true', default=False, help='Whether to detach encoder for weak branch or not')
-
-    # rescale settings
-    parser.add_argument('--rescale_weights', action='store_true', default=False, help='Whether to rescale weights or not')
-    parser.add_argument('--rescale_weights_positive_mean', dest='weight_pos_mean', type=float, default=0.75, help='Positive mean for rescaling weights')
-    parser.add_argument('--rescale_weights_negative_mean', dest='weight_neg_mean', type=float, default=0.25, help='Negative mean for rescaling weights')
-
-    # get common arguments
-    parser = get_common_args(parser)
-
-    # initialize arguments
-    args = parser.parse_args()
-
-    # computing environment parameters
-    args = get_device_info(args)
-
-    # set saving dir
-    args = set_log_files(args, w_unc=True)
+    args = set_log_files(args)
 
     return args
 
@@ -147,12 +108,18 @@ def get_args_ov():
     parser.add_argument('--test_max_threshold', type=float, default=-1)
     parser.add_argument('--test_background_id', dest='test_bg_idx', type=int, default=0)
 
+    # mc dropout settings
+    parser.add_argument('--test-with-mc-dropout', dest='ts_wmc', action='store_true', default=False, help='Whether to use MC dropout for testing or not')
+    parser.add_argument('--number-of-mc-iterations', dest='n_mc', type=int, default=10, help='Number of MC dropout iterations for testing')
+    parser.add_argument('--test-with-auxiliary-decoder', dest='ts_waux', action='store_true', default=False, help='Whether to use auxiliary decoder for testing or not')
+
     # proxy settings
     parser.add_argument('--clip_type', type=str, default='openai', help='Type of CLIP model')
     parser.add_argument('--clip_visual_type', type=str, default='ViT-B/16', help='Type of CLIP visual model')
     parser.add_argument('--clip_slide_stride', type=int, default=112, help='Stride of cropping')
     parser.add_argument('--clip_slide_crop', type=int, default=336, help='Size of crops')
     parser.add_argument('--vfm_model', type=str, default='weak', help='Type of VFM model for proxyclip')
+    parser.add_argument('--vfm_type', type=str, default='cross-modal', choices=['cross-modal', 'dot-product'], help='Type of VFM structure: cross-modal or dot-product')
     parser.add_argument('--weak_feature_type', dest='weak_feat_type', type=str, default='encoder_embed', choices=['encoder_embed', 'preout_embed'], help='Type of features of weak VFM model.')
     parser.add_argument('--max-confidence-threshold', dest='max_thr', type=float, default=0.6, help='Max confidence threshold for fusion.')
     # get common arguments
@@ -187,6 +154,7 @@ def get_common_args(parser):
     parser.add_argument('--expand-decoder-dimension', dest='de_expand_dim', action='store_true', default=False, help='Whether to expand decoder dimension or not (False: //4, //8; True: *1, *2 to align with CLIP-base dimension)')
     parser.add_argument('--use-cross-attention-two-way-trans', dest='opt_two', action='store_true', default=False, help='Whether to use noise mask embedding as an additional input in the two-way transformer (option 2) or not (option 1).')
     parser.add_argument('--use-feature-norm', action='store_true', default=False, help='Whether to use feature normalization or not when generating masks')
+    parser.add_argument('--use-separate-prompt-fn', dest='sep_pfn', action='store_true', default=False, help='Whether to use separate prompt function for auxiliary decoder(s) or not')
     # alignment to clip
     parser.add_argument('--align-to-clip', action='store_true', default=False, help='Whether using distillation losses to align the model to clip feature space or not')
     parser.add_argument('--clip-model-type', type=str, choices=['vanilla', 'MaskCLIP', 'GEM', 'SCLIP', 'ClearCLIP'], default='ClearCLIP', help='Type of clip model used for feature alignment.')
@@ -242,19 +210,21 @@ def get_common_args(parser):
     return parser
 
 
-def set_log_files(args, w_unc=False, lbl_smt_type='none'):
+def set_log_files(args):
+    exist_tag = f'NoE_' if args.mute_exist_loss else ''
     expand_dim_tag = 'E' if args.de_expand_dim else ''
     # group name
     noise_mask_loss_tag = 'l' if args.use_noise_mask_loss else ''
+    # one or two branches
     if args.use_sep_aux_de_weak:
-        aux = f'_sepaux_attcp'
+        aux = '_sepaux'
     else:
         ctag = 'c' if args.share_connect else ''
-        aux = f'_aux{noise_mask_loss_tag}{ctag}_attcp' if args.use_aux_decoder else '_attcp'
+        aux = f'_aux{noise_mask_loss_tag}{ctag}' if args.use_aux_decoder else ''
     # adaptor
     args.use_adaptor = not args.mute_adaptor
     if args.use_adaptor:
-        args.gname = f'FT{expand_dim_tag}'
+        args.gname = f'{exist_tag}FT{expand_dim_tag}'
         # high-frequency option
         if args.mute_highfreq:
             args.gname += '_noHF'
@@ -272,7 +242,7 @@ def set_log_files(args, w_unc=False, lbl_smt_type='none'):
                 dofa_active += 'woRGB'               
             args.gname += f'_dofa{args.dofa_type[4]}{dofa_active}{aux}'
     else:
-        args.gname = f'FT{expand_dim_tag}_woAd{aux}'
+        args.gname = f'{exist_tag}FT{expand_dim_tag}_woAd{aux}'
 
     # training size
     subset = f'_sub{args.subset_proportion}' if args.subset_proportion<1 else ''
@@ -295,13 +265,6 @@ def set_log_files(args, w_unc=False, lbl_smt_type='none'):
     # alignment settings
     if args.align_to_clip:
         args.gname += f'_a{args.clip_model_type}_{args.align_loss_type}'
-    
-    # label smooth settings
-    if lbl_smt_type != 'none':
-        args.gname += f'_{args.lbl_smt_w}{lbl_smt_type[0]}'
-        if lbl_smt_type=='text':
-            if args.lbl_smt_wavg>0: args.gname += f'{args.lbl_smt_wavg}'
-            args.gname += f'T{args.lbl_smt_t}'
         
     # job type
     args.job_type = f'{int(args.wfocal)}F_{int(args.wdice)}D_{int(args.wce)}C' 
@@ -332,16 +295,6 @@ def set_log_files(args, w_unc=False, lbl_smt_type='none'):
     # dropout settings
     if args.use_mc_dropout:
         args.job_type += f'_drop{int(100*args.p_mc_dropout)}'
-    # for uncertainty part
-    if w_unc:
-        args.gname += f'_unc{args.weak_weight_final}'
-        args.job_type += f'_rmup{args.weak_weight_rampup_start}_{args.weak_weight_rampup_end}_l{args.weak_unc_lambda}'
-        if args.weak_detach: args.job_type += '_denc'
-        args.gname += '_wowl' if args.no_weak_input else ''
-        if args.rescale_weights:
-            args.gname += f'_rw_p{args.weight_pos_mean}_n{args.weight_neg_mean}'
-        if args.use_logvar_smooth:
-            args.job_type += '_fsmt' if args.fix_logvar_smooth else '_asmt'
     # # for debugging tag
     # args.job_type += args.debug
 
