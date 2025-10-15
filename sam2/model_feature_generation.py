@@ -48,7 +48,8 @@ class GenerateFeat():
                                  f'++model.use_auxiliary_decoder={args.use_aux_decoder}',
                                  f'++model.decoder_expand_dim={args.de_expand_dim}',
                                  f'++model.decoder_use_opt_two={args.opt_two}',
-                                 f'++model.decoder_use_feature_norm={args.use_feature_norm}',]
+                                 f'++model.decoder_use_feature_norm={args.use_feature_norm}',
+                                 f'++model.clip_use_quick_gelu={args.clip_use_quick_gelu}',]
         if args.mute_adaptor: hydra_overrides_extra += ['++model.image_encoder.trunk.adaptor=None']
         if args.dofa_unfix_weights: 
             hydra_overrides_extra += ['++model.image_encoder.trunk.dofa_unfix_weights=True']

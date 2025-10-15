@@ -41,6 +41,7 @@ class SAM2Base(torch.nn.Module):
         decoder_use_feature_norm: bool = False,
         aux_decoder_share_embedding: bool = False,
         use_separate_prompt_fn: bool = False,
+        clip_use_quick_gelu: bool = False,
     ):
         super().__init__()
 
@@ -67,7 +68,7 @@ class SAM2Base(torch.nn.Module):
         self.sam_mask_decoder_extra_args = sam_mask_decoder_extra_args
         self.use_sam_prompt_fn_aux = use_separate_prompt_fn
 
-        self._build_sam_heads(decoder_expand_dim, decoder_use_opt_two, decoder_use_feature_norm)
+        self._build_sam_heads(decoder_expand_dim, decoder_use_opt_two, decoder_use_feature_norm, clip_use_quick_gelu)
         
         # Model compilation
         if compile_image_encoder:
@@ -95,7 +96,7 @@ class SAM2Base(torch.nn.Module):
         )
 
 
-    def _build_sam_heads(self, decoder_expand_dim, decoder_use_opt_two, decoder_use_feature_norm):
+    def _build_sam_heads(self, decoder_expand_dim, decoder_use_opt_two, decoder_use_feature_norm, clip_use_quick_gelu):
         """Build SAM-style prompt encoder and mask decoder."""
         self.sam_prompt_embed_dim = self.hidden_dim
         self.sam_image_embedding_size = self.image_size // self.backbone_stride
@@ -109,6 +110,7 @@ class SAM2Base(torch.nn.Module):
             transformer_heads=8,  # 8 by default for CLIP
             transformer_layers=12,  # 12 by default for CLIP
             transformer_width=512,  # 512 by default for CLIP (base) / 768 - large
+            use_quick_gelu=clip_use_quick_gelu,
         )
         self.sam_prompt_fn = torch.nn.Linear(clip_embed_dim, self.sam_prompt_embed_dim, bias=True)
         trans = TwoWayTransformer_opt2 if decoder_use_opt_two else TwoWayTransformer

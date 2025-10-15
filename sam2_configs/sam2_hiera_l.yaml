@@ -48,3 +48,5 @@ model:
   iou_prediction_use_sigmoid: True
   # Compilation flag
   compile_image_encoder: False
+  # clip_use_quick_gelu: False
+  clip_use_quick_gelu: False

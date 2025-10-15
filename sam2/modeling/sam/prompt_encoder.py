@@ -193,7 +193,8 @@ class PromptEncoderCLIP(nn.Module):
                  transformer_width: int,
                  transformer_heads: int,
                  transformer_layers: int,
-                 dtype: torch.dtype = torch.float32
+                 dtype: torch.dtype = torch.float32,
+                 use_quick_gelu: bool = False
                  ):
         super().__init__()
         
@@ -204,7 +205,8 @@ class PromptEncoderCLIP(nn.Module):
             width=transformer_width,
             layers=transformer_layers,
             heads=transformer_heads,
-            attn_mask=self.build_attention_mask()
+            attn_mask=self.build_attention_mask(),
+            use_quick_gelu=use_quick_gelu
         )
 
         self.vocab_size = vocab_size
@@ -284,14 +286,15 @@ class QuickGELU(nn.Module):
     
 
 class ResidualAttentionBlock(nn.Module):
-    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None):
+    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, use_quick_gelu: bool = False):
         super().__init__()
 
         self.attn = nn.MultiheadAttention(d_model, n_head, batch_first=True)
         self.ln_1 = LayerNorm(d_model)
+        gelu = QuickGELU if use_quick_gelu else nn.GELU
         self.mlp = nn.Sequential(OrderedDict([
             ("c_fc", nn.Linear(d_model, d_model * 4)),
-            ("gelu", nn.GELU()), #nn.GELU()), #QuickGELU()),    # by default, open clip uses GELU not QuickGELU 
+            ("gelu", gelu()), #nn.GELU()), #QuickGELU()),    # by default, open clip uses GELU not QuickGELU 
             ("c_proj", nn.Linear(d_model * 4, d_model))
         ]))
         self.ln_2 = LayerNorm(d_model)
@@ -308,11 +311,11 @@ class ResidualAttentionBlock(nn.Module):
     
 
 class Transformer(nn.Module):
-    def __init__(self, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None):
+    def __init__(self, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, use_quick_gelu: bool = False):
         super().__init__()
         self.width = width
         self.layers = layers
-        self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask) for _ in range(layers)])
+        self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask, use_quick_gelu=use_quick_gelu) for _ in range(layers)])
 
     def forward(self, x: torch.Tensor):
         return self.resblocks(x)

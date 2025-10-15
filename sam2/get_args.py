@@ -155,6 +155,7 @@ def get_common_args(parser):
     parser.add_argument('--use-cross-attention-two-way-trans', dest='opt_two', action='store_true', default=False, help='Whether to use noise mask embedding as an additional input in the two-way transformer (option 2) or not (option 1).')
     parser.add_argument('--use-feature-norm', action='store_true', default=False, help='Whether to use feature normalization or not when generating masks')
     parser.add_argument('--use-separate-prompt-fn', dest='sep_pfn', action='store_true', default=False, help='Whether to use separate prompt function for auxiliary decoder(s) or not')
+    parser.add_argument('--clip-use-quick-gelu', action='store_true', default=False, help='Whether to use QuickGELU in the CLIP text encoder or not')
     # alignment to clip
     parser.add_argument('--align-to-clip', action='store_true', default=False, help='Whether using distillation losses to align the model to clip feature space or not')
     parser.add_argument('--clip-model-type', type=str, choices=['vanilla', 'MaskCLIP', 'GEM', 'SCLIP', 'ClearCLIP'], default='ClearCLIP', help='Type of clip model used for feature alignment.')
