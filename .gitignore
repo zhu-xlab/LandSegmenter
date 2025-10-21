@@ -6,9 +6,18 @@ __pycache__/
 *.egg*
 build/*
 _C.*
+
+# .devcontainer
+# .github
+# .ipynb_checkpoints
+# .Trash-0
+# .dockerignore
+# .clang-format
+
 outputs/*
 checkpoints/*.pt
 checkpoints/*.pth
+checkpoints/*.ckpt
 *.sh
 *.h5
 srun_outs*
@@ -35,5 +44,9 @@ ft_compare
 models/ckpts
 tmp.ipynb
 tmp*
+ProxyCLIP/configs/cls_yue.txt
 
 check_text_embeddings
+cmaps
+
+show_train_sample_*

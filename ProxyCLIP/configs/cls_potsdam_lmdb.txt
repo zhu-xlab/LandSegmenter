@@ -1,6 +1,0 @@
-background; clutter; barren land; bare land; water; crop; agricultural land; rock, sand, clay and soil; wetland; ice and snow
-grass, shrub and scrub; herb; scrub; shrub; grass; low vegetation
-road; transportation; impervious area except for building; impervious area; parking lot
-car
-building
-tree; forest

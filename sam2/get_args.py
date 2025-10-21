@@ -338,6 +338,7 @@ def set_log_files(args):
 def get_device_info(args):
     if args.slurm:
         args.slurm = "SLURM_JOB_ID" in os.environ
+    stage_tag = 'testing' if args.test_only else 'training'
         
     if args.slurm:
         args.nodes = int(os.environ["SLURM_NNODES"])
@@ -358,15 +359,15 @@ def get_device_info(args):
                 print('No GPU found, switch to CPU mode.')
             elif args.devices == 1:
                 args.current_device = 0
-                print('Using 1 GPU for training!')
+                print(f'Using 1 GPU for {stage_tag}!')
             else:
                 args.current_device = int(os.environ["LOCAL_RANK"])
-                print(f'No slurm found! Uising {args.devices} local GPUs for training (current:{args.current_device})!')
+                print(f'No slurm found! Uising {args.devices} local GPUs for {stage_tag} (current:{args.current_device})!')
         # cpu
         if args.accelerator == 'cpu':
             args.devices = 1
             args.current_device = 0
-            print('Using CPU for training!')
+            print(f'Using CPU for {stage_tag}!')
             # args.devices = os.cpu_count()
             # print(f'Uising {args.devices} CPU cores for training!')
         args.ntasks = args.devices

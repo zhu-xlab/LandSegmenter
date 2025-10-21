@@ -265,7 +265,12 @@ class GenerateFeat():
         # if_weak_lbl = batch[KEY_WEAKLBL][0]
 
         # prepare prompts
-        cls_all = class_names[dataset_name]
+        if 'nlcd' in dataset_name: 
+            dataset_key = 'nlcd-lc'
+            y = y[:,0]
+        else:
+            dataset_key = dataset_name
+        cls_all = class_names[dataset_key]
         num_class = len(cls_all)
         CLS_DICT = {}
         class_id_list = []

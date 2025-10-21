@@ -1,7 +1,7 @@
-background
+background; grass
 building; roof; house
 road
 water
 barren
-forest
-agricultural
+forest; tree
+agricultural; crop

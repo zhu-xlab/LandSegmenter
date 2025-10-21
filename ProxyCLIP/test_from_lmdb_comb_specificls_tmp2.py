@@ -90,9 +90,6 @@ def main():
             args.use_aux_decoder = 3
         else:
             args.use_aux_decoder = 8
-    
-    with open('params_tmp.txt', 'w') as ft:
-            json.dump(args.__dict__, ft)
 
     for di, args.dataset_name in enumerate(args.test_dataset_names):
         t1 = datetime.datetime.now().replace(microsecond=0)

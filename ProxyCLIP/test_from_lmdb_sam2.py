@@ -96,19 +96,19 @@ def main():
         args.n_ts = len(test_dataset)
         # args.n_classes = len(class_names[args.dataset_name])
 
-        # saving path
-        args.pdir = args.ts_wpath.split('checkpoints')[0]
-        if args.test_use_multiple_prompts:
-            args.pdir = os.path.join(args.pdir, 'accuracy_mp')
-        else:
-            args.pdir = os.path.join(args.pdir, 'accuracy')
-        if not os.path.exists(args.pdir): 
-            try:
-                os.makedirs(args.pdir)
-            except Exception as inner_e:
-                assert os.path.exists(args.pdir), f'Accuracy directory does not exist and cannot be created: {args.pdir}. Error: {inner_e}'
-        pred_fname = f'pmaps_OV_{args.vfm_model}_{args.dataset_name}.h5'
-        test_save_path = os.path.join(args.pdir, pred_fname)
+        # # saving path
+        # args.pdir = args.ts_wpath.split('checkpoints')[0]
+        # if args.test_use_multiple_prompts:
+        #     args.pdir = os.path.join(args.pdir, 'accuracy_mp')
+        # else:
+        #     args.pdir = os.path.join(args.pdir, 'accuracy')
+        # if not os.path.exists(args.pdir): 
+        #     try:
+        #         os.makedirs(args.pdir)
+        #     except Exception as inner_e:
+        #         assert os.path.exists(args.pdir), f'Accuracy directory does not exist and cannot be created: {args.pdir}. Error: {inner_e}'
+        # pred_fname = f'pmaps_OV_{args.vfm_model}_{args.dataset_name}.h5'
+        # test_save_path = os.path.join(args.pdir, pred_fname)
         
     # # load data
     # test_dataset = PotsdamDataset('data/weakFT/test/potsdam_p512_val.lmdb',
@@ -150,8 +150,9 @@ def main():
         ys = np.concatenate(ys, axis=0)
         ys = np.where(ys!=MASK_CODE, ys+1, 0)
         preds_clip = np.concatenate(preds_clip, axis=0)+1
-        with h5py.File(test_save_path, 'w') as f:
-            f.create_dataset('preds_clip', data=preds_clip, dtype=np.uint8)
+        np.save(f'preds_{args.dataset_name}_proxy_{args.vfm_model}.npy', preds_clip)
+        # with h5py.File(test_save_path, 'w') as f:
+        #     f.create_dataset('preds_clip', data=preds_clip, dtype=np.uint8)
         n_classes = np.max(ys)
         preds_clip[ys==0] = 0
         ts_iou_all, ts_oa = calculate_acc_from_all(preds_clip, ys, n_classes)

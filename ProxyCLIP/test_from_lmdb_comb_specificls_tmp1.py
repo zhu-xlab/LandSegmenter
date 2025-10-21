@@ -137,7 +137,6 @@ def main():
                                 pin_memory=True, shuffle=False, drop_last=False)
         args.n_batch = len(test_loader)
         args.n_ts = len(test_dataset)
-        # args.n_classes = len(class_names[args.dataset_name])
 
         # saving path
         args.pdir = args.ts_wpath.split('checkpoints')[0]
@@ -156,22 +155,12 @@ def main():
         # test_save_path = os.path.join(args.pdir, pred_fname)
         pred_fname = f'pred_OV_{args.dataset_name}.xlsx'
         test_save_path = os.path.join(args.pdir, pred_fname)
-        
-    # # load data
-    # test_dataset = PotsdamDataset('data/weakFT/test/potsdam_p512_val.lmdb',
-    #                             n_bands=datasets_settings_test[dataset_name]['n_channels'],)
-    # test_loader = DataLoader(test_dataset, batch_size=1, num_workers=8,
-    #                         pin_memory=True, shuffle=False, drop_last=False)
-    # n_batch = len(test_loader)
-    # n_ts = len(test_dataset)
-    # print(f'Total test data: {n_ts} | Number of batches: {n_batch}')
 
         model = ProxyCLIPSegmentation(clip_type=args.clip_type, 
                                       model_type=args.clip_visual_type, 
                                       vfm_model=args.vfm_model,
                                       name_path=f'ProxyCLIP/configs/cls_{args.dataset_name}.txt',
                                       slide_stride=args.clip_slide_stride, slide_crop=args.clip_slide_crop,
-                                      #   slide_stride=112, slide_crop=336,
                                       args=args,
                                       )
         print(f'clip_slide_stride:{args.clip_slide_stride}, clip_slide_crop:{args.clip_slide_crop}')
@@ -179,8 +168,6 @@ def main():
         # predictions
         t0 = datetime.datetime.now().replace(microsecond=0)
         preds, ys, preds_clip, preds_weak = [], [], [], []
-        # max_thr = 0.6
-        # show_imgs = []
         for i, batch in enumerate(test_loader):
             # if i==2:
             x = batch[KEY_IMG].contiguous().to('cuda')
@@ -216,7 +203,7 @@ def main():
             preds_clip.append(seg_clip.cpu().numpy())
             # preds_weak.append(seg_weak.cpu().numpy())
             ys.append(y.numpy())
-            # if i==20: break
+            if i==5: break
             # if i==0:
             # with h5py.File(test_save_path, 'w') as f:
             #     f.create_dataset('clip_prob', data=clip_prob.cpu().numpy())
@@ -265,29 +252,6 @@ def main():
 
         t2 = datetime.datetime.now().replace(microsecond=0)
         print(f'Inference time: {t1-t0} | Acc calculating time: {t2-t1}')
-
-        # for sid in [0,10]:
-        #     plt.figure()
-        #     plt.subplot(1, 2, 1)
-        #     plt.imshow(preds[sid], cmap='tab10', vmin=0, vmax=6, interpolation='none')
-        #     plt.subplot(1, 2, 2)
-        #     plt.imshow(ys[sid], cmap='tab10', vmin=0, vmax=6, interpolation='none')
-        #     plt.savefig(os.path.join(args.pdir, f'Image_OVC_{args.weak_feat_type}_EP{ep}_{args.dataset_name}_{sid}_{args.clip_slide_stride}_{args.clip_slide_crop}.png'), bbox_inches='tight')
-        # for sid in [42, 60, 78, 80, 101, 106, 123, 124, 137, 140, 142, 145, 148, 150, 162, 169, 183, 191, 193]:
-        #     plt.figure()
-        #     plt.subplot(1, 4, 1)
-        #     plt.imshow(preds_clip[sid], cmap='tab10', vmin=0, vmax=n_classes, interpolation='none')
-        #     plt.axis('off')
-        #     plt.subplot(1, 4, 2)
-        #     plt.imshow(preds_weak[sid], cmap='tab10', vmin=0, vmax=n_classes, interpolation='none')
-        #     plt.axis('off')
-        #     plt.subplot(1, 4, 3)
-        #     plt.imshow(preds[sid], cmap='tab10', vmin=0, vmax=n_classes, interpolation='none')
-        #     plt.axis('off')
-        #     plt.subplot(1, 4, 4)
-        #     plt.imshow(ys[sid], cmap='tab10', vmin=0, vmax=n_classes, interpolation='none')
-        #     plt.axis('off')
-        #     plt.savefig(os.path.join(args.pdir, f'Image_OVC_{args.weak_feat_type}_EP{ep}_{args.dataset_name}_{sid}_{args.clip_slide_stride}_{args.clip_slide_crop}.png'), bbox_inches='tight')
 
 if __name__ == '__main__': 
     main()

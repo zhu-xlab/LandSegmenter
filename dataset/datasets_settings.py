@@ -1,7 +1,6 @@
 import os
 
-dataset_names = ['dw', 'dynamicearthnet', 'openearthmap']
-data_dir = 'data/weakFT'
+data_dir = '/data/weakFT' 
 weak_lmdb_dir = os.path.join(data_dir, 'weak')
 exact_lmdb_dir = os.path.join(data_dir, 'exact')
 test_lmdb_dir = os.path.join(data_dir, 'test')
@@ -81,25 +80,11 @@ datasets_settings_test = {
         'input_size': 256,
     },
 
-    'vaihingen': {
-        'data_path': os.path.join(test_lmdb_dir, 'vaihingen_p256_val.lmdb'),
-        'data_path_ft': os.path.join(ft_lmdb_dir, 'vaihingen_p256_train.lmdb'),
-        'input_size': 256,
-    },
-
     'potsdam': {
         'data_path': os.path.join(test_lmdb_dir, 'potsdam_p512_val.lmdb'),
         'data_path_ft': os.path.join(ft_lmdb_dir, 'potsdam_p512_train.lmdb'),
         'n_channels': 3,
         'input_size': 512,
-    },
-
-
-    'potsdam256': {
-        'data_path': os.path.join(test_lmdb_dir, 'potsdam_p256_val.lmdb'),
-        'data_path_ft': os.path.join(ft_lmdb_dir, 'potsdam_p256_train.lmdb'),
-        'n_channels': 3,
-        'input_size': 256,
     },
 
     'nyc': {
@@ -283,39 +268,6 @@ class_names = {
         11:['inland wetland'],
         12:['coastal wetland'],
     },
-    # 'osm':{
-    #     0: ['residential area'],
-    #     1: ['arable land', 'herbaceous crop'],
-    #     2: ['forest', 'tree', 'wood'],
-    #     3: ['industrial, commercial and transportation area', 'road', 'transportation', 'industrial area', 'commercial area'],
-    #     4: ['artificial vegetation', 'non-argricultural vegetation'],
-    #     5: ['mine, dump and construction sites'],
-    #     6: ['pasture'],
-    #     7: ['permanent crop', 'woody crop'],
-    #     8: ['water'],
-    #     9: ['bare land', 'barren land'],
-    #     10:['shrub', 'scrub', 'grass'], #, 'grass except for pasture', 'herb except for pasture'], # 'shrub and herbaceous vegetation'],
-    #     11:['inland wetland'],
-    #     12:['coastal wetland'],
-    # },
-
-    'vaihingen':{
-        0: ['others except for grass, shrub, scrub, impervious area, car, building and tree'],
-        1: ['grass, shrub and scrub'],  # low vegetation
-        2: ['impervious area'],  # impervious surfaces
-        3: ['car'],  # car
-        4: ['building'],  # roof
-        5: ['tree'],  # tree
-    },
-
-    # 'potsdam':{
-    #     0: ['others except for grass, shrub, scrub, impervious area, car, building and tree', 'barren land', 'bare land', 'water'], # ['others except for grass, shrub, scrub, impervious area, car, building and tree'],
-    #     1: ['grass, shrub and scrub', 'herb', 'scrub', 'shrub', 'grass'],  # low vegetation
-    #     2: ['impervious area including road', 'road', 'impervious area'], # ['impervious area'],  # impervious surfaces
-    #     3: ['car'],  # car
-    #     4: ['building'],  # roof
-    #     5: ['tree', 'forest', 'wood'],  # tree
-    # },
 
     'nyc':{
         0: ['tree'], #], 'forest', 'wood'],
@@ -328,30 +280,6 @@ class_names = {
         7: ['railway'],
     },
 
-    # v1 - 0.43139307, 0.33439173, 0.05902506, 0.50567366, 0.46548849, 0.16560602, 0.3101188 , 0.0136799 , 0.28567209, 0.49804111
-    # 'nyc':{
-    #     0: ['tree', 'forest'],
-    #     1: ['grass, shrub and scrub', 'herb', 'grass', 'shrub', 'scrub'],
-    #     2: ['bare land', 'barren land', 'rock, sand, clay and soil'],
-    #     3: ['water'],
-    #     4: ['building'],
-    #     5: ['road except for railway', 'transportation except for railway'],
-    #     6: ['impervious area except for road and building'],
-    #     7: ['railway'],
-    # },
-
-    # v2 - [45.62, 25.37, 6.92, 39.91, 41.19, 20.68, 25.44, 2.71] [25.98, 47.5]
-    # 'nyc':{
-    #     0: ['tree', 'forest', 'wood'],
-    #     1: ['grass', 'herb'], # ['grass, shrub and scrub'],
-    #     2: ['bare land', 'barren land', 'rock, sand, clay and soil'],
-    #     3: ['water'],
-    #     4: ['building'],
-    #     5: ['road except for railway', 'transportation except for railway'],
-    #     6: ['impervious area except for road and building'],
-    #     7: ['railway'],
-    # },
-
     'potsdam':{
         0: ['barren land', 'bare land', 'water', 'crop', 'agricultural land', 'rock, sand, clay and soil', 'wetland', 'ice and snow'], #'others except for grass, shrub, scrub, impervious area, car, building and tree'],
         # 0: ['barren land', 'bare land', 'water', 'crop'],
@@ -362,17 +290,6 @@ class_names = {
         5: ['tree', 'forest'],  # tree
     },
 
-    # v1 - 0.0758773276e, 0.554983439e, 0.633068191e, 0.000103955133, 0.789058193e, 0.344188778, 0.399546647, 0.724730227e
-    # 'potsdam':{
-    #     0: ['ice and snow', 'barren land', 'bare land', 'water', 'crop', 'agricultural land', 'rock, sand, clay and soil'], # ['others except for grass, shrub, scrub, impervious area, car, building and tree'],
-    #     1: ['grass, shrub and scrub', 'herb', 'scrub', 'shrub', 'grass'],  # low vegetation
-    #     2: ['road', 'transportation', 'impervious area except for building'], # ['impervious area'],  # impervious surfaces
-    #     3: ['car'],  # car
-    #     4: ['building'],  # roof
-    #     5: ['tree', 'forest', 'wood'],  # tree
-    # },
-
-    # select v3
     'loveda':{
         0: ['impervious area except for road and building', 'grass', 'shrub', 'scrub'],
         1: ['building'],  # building
@@ -382,44 +299,7 @@ class_names = {
         5: ['tree', 'forest'],  # tree
         6: ['agricultural land', 'crop', 'crop land'],  # agricultural land
     },
-
-    # v1 - 0.3553743 , 0.56680558, 0.47481337, 0.46216657, 0.04878217, 0.29141114, 0.51697326, 0.38804663, 0.5844886 
-    #      0.36339748, 0.56276136, 0.45394944, 0.47532036, 0.03620452, 0.35580808, 0.50269756, 0.39287697, 0.5965044
-    # 'loveda':{
-    #     0: ['others except for building, road, water, barren land, tree and agricultural land', 'impervious area except for road and building', 'grass', 'shrub', 'scrub'],
-    #     1: ['building'],  # building
-    #     2: ['road', 'transportation'],  # road
-    #     3: ['water'],  # water
-    #     4: ['barren land', 'bare land', 'barren', 'bare'],  # bare land
-    #     5: ['tree', 'forest', 'wood'],  # tree
-    #     6: ['agricultural land', 'crop'],  # agricultural land
-    # },
-
-    # v2 - 0.28433398, 0.58067104, 0.4868177 , 0.45807776, 0.12002728, 0.28101899, 0.51454315, 0.3893557 , 0.55880743
-    # 'loveda':{
-    #     0: ['impervious area', 'grass', 'shrub', 'scrub'],
-    #     1: ['building'],  # building
-    #     2: ['road', 'transportation'],  # road
-    #     3: ['water'],  # water
-    #     4: ['barren land', 'bare land', 'soil', 'rock, sand, clay and soil'],  # bare land
-    #     5: ['tree', 'forest'],  # tree
-    #     6: ['agricultural land', 'crop', 'crop land'],  # agricultural land
-    # },
-
-    # v3 - 0.33333228, 0.56682832, 0.47487749, 0.46178705, 0.10318684, 0.29261969, 0.51742279, 0.39286492, 0.57350196
-    # 'loveda':{
-    #     0: ['impervious area except for road and building', 'grass', 'shrub', 'scrub'],
-    #     1: ['building'],  # building
-    #     2: ['road', 'transportation'],  # road
-    #     3: ['water'],  # water
-    #     4: ['barren land', 'bare land', 'soil', 'rock, sand, clay and soil'],  # bare land
-    #     5: ['tree', 'forest'],  # tree
-    #     6: ['agricultural land', 'crop', 'crop land'],  # agricultural land
-    # },
 }
-
-
-class_names['potsdam256'] = class_names['potsdam']
 
 
 class_weight_list = {
