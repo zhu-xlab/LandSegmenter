@@ -61,10 +61,6 @@ def main():
         n_channels = 3
     else:
         n_channels = datasets_settings_test[args.dataset_name]['n_channels']
-        # if 'vit' in args.dofa_type:
-        #     n_channels = datasets_settings_test[args.dataset_name]['n_channels']
-        # else:
-        #     n_channels = 3 
         
     if args.dataset_name == 'dw':
         train_dataset = DWOSMDataset(datasets_settings_test['dw']['data_path_ft'],
@@ -75,9 +71,6 @@ def main():
                                     mode=datasets_settings_test['dw']['mode'],
                                     n_bands=n_channels,
                                     transform=trans_ts)
-    elif args.dataset_name == 'openearthmap':
-        test_dataset = OpenEarthMapDataset(datasets_settings_test['openearthmap']['data_path'],
-                                        transform=trans_ts)
     elif args.dataset_name == 'multisenge':
         train_dataset = MultiSenGeDataset(datasets_settings_test['multisenge']['data_path_ft'],
                                           n_bands=n_channels,
@@ -96,11 +89,6 @@ def main():
                                     n_bands=n_channels,
                                     lbl_type='osm',
                                     transform=trans_ts)
-    elif args.dataset_name == 'vaihingen':
-        train_dataset = VaihingenDataset(datasets_settings_test['vaihingen']['data_path_ft'],
-                                         transform=trans_tr)
-        test_dataset = VaihingenDataset(datasets_settings_test['vaihingen']['data_path'],
-                                        transform=trans_ts)
     elif args.dataset_name == 'nyc':
         train_dataset = NYCDataset(datasets_settings_test['nyc']['data_path_ft'],
                                    n_bands=n_channels,
@@ -133,7 +121,7 @@ def main():
     args.n_ts = len(test_dataset)
     # args.n_classes = len(class_names[args.dataset_name])
 
-    # saving path
+    ###### 3 - set saving path ######
     if args.ft_wpath is None or args.ft_wpath=='None':
         if args.mute_adaptor:
             args.gname = 'sam2_ft'
@@ -143,18 +131,11 @@ def main():
             else:
                 args.gname = f'sam2_adaptor_ft_{args.dofa_type}'
             # raise ValueError('Please provide the path to the pre-trained model for fine-tuning or mute the adaptor!')
-        args.gname += f'_{args.ckpt_path_clip.split("/")[-1][:4]}' # tag for language model
-        args.pdir = os.path.join(f'Results_{args.gname}', sub_tag)
+        args.gname += f'_{args.ckpt_path_clip.split("/")[-1][:4]}_{sub_tag}' # tag for language model
     else:
-        args.pdir = args.ft_wpath.split('checkpoints')[0]
-        gname_list = args.pdir.split('/')[-4:-2]
-        args.gname = args.pdir.split('/')[-5][8:]
-        args.gname = args.gname + '_' + '_'.join(gname_list)
-        resume_epoch = args.ft_wpath.split("epoch=")[-1].split("-")[0]
-        args.gname += f'_fe{resume_epoch}'
-        args.pdir = os.path.join(args.pdir, f'fine_tune_fe{resume_epoch}_{sub_tag}')
-    # add sub-tag to the group name
-    if 'sub' in sub_tag: args.gname = f'{sub_tag}_{args.gname}'
+        resume_epoch = args.ft_wpath.split("epoch=")[-1].split(".")[0]
+        args.gname = f'LandSeg_ft_fe{resume_epoch}_{sub_tag}'
+    args.pdir = os.path.join(args.save_dir, args.gname)
     # lr
     ea = int(np.ceil(np.log10(1/args.lr)))
     eb = int(np.round(args.lr*10**ea))

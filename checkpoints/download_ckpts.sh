@@ -16,8 +16,8 @@ wget $sam2_hiera_l_url || { echo "Failed to download checkpoint from $sam2_hiera
 # download dofa checkpoint
 wget https://huggingface.co/earthflow/DOFA/resolve/main/DOFA_ViT_base_e100.pth
 
-# download RemoteCLIP checkpoint
-wget https://huggingface.co/chendelong/RemoteCLIP/resolve/main/RemoteCLIP-ViT-B-32.pt
+# download GeoRSCLIP checkpoint
+wget https://huggingface.co/Zilun/GeoRSCLIP/resolve/main/ckpt/RS5M_ViT-B-32.pt
 
 # download LandSegmenter checkpoint
 wget https://huggingface.co/vikki23/LandSegmenter/resolve/main/LandSegmenter-epoch%3D49.ckpt

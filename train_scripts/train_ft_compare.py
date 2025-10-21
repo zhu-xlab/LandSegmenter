@@ -50,14 +50,8 @@ def get_args_ft():
                         help='Type of used model framework.')
     parser.add_argument('--model_type', dest='mt', type=str, default='resnet50', # choices=['resnet50','vit_small_patch16_224' (decur)]
                         help='Type of used models. It is mainly utilized to define the encoder part') 
-    # parser.add_argument('--patch_size', type=int, default=None, 
-    #                     help='Patch size for transformer-based models.')
-    # parser.add_argument('--image_size', type=int, dest='im_size', default=None,
-    #                     help='Image size for transformer-based models.')
     parser.add_argument('--n_channels', type=int, default=3,
                         help='Number of input channels.') 
-    # parser.add_argument('--n_classes', type=int, default=8,
-    #                     help='Number of predefined classese.')
     parser.add_argument('--loss_type', type=str, default='cd',
                         help='Type of used segmentation loss function for training. ' +
                         'Specifically, \'c\' represents CrossEntropy loss, \'d\' represents Dice loss, \'f\' represents focal loss.') 
@@ -100,7 +94,6 @@ def get_args_ft():
                         help='Set the display interval during the training')
     parser.add_argument('--save_interval', dest='save_inv', type=int, default=1,
                         help='Set the save interval during the training')
-    # parser.add_argument("--print_to_log", action="store_false", help="If true, directs std-out to log file")
     parser.add_argument("--batch_to_wandb", action="store_true", help="If true, log batch-wise training results to wandb")
     parser.add_argument('--seed', type=int, default=42)
     # finetune settings
@@ -118,8 +111,6 @@ def get_args_ft():
                         help='Values of scheduler to use (the epoch indexes for step scheduler; number of iterations for cosine scheduler)')
     parser.add_argument('--encoder_finetune_epoch', dest='eft_ep', type=int, default=0, 
                         help='Epoch index when starting to finetune the encoder if eft_tag is \'eft\'')
-    # parser.add_argument('--encoder_finetune_lr', dest='eft_lr', type=float, default=0.001,
-    #                     help='Learning rate for encoder (the whole net) finetuning')
     # for test
     parser.add_argument('--only_test', action='store_true', default=False,
                         help='Only test models.')
@@ -131,12 +122,6 @@ def get_args_ft():
     
     # computing environment parameters
     args = get_device_info(args)
-    
-    # # set saving dir
-    # args = set_log_files(args)
-    
-    # # set class dictionary for logging images
-    # args.cls_dict = CLS_DICT[args.n_classes]
     
     return args
 
@@ -170,8 +155,6 @@ def get_device_info(args):
             args.devices = 1
             args.current_device = 0
             print('Uising CPU for training!')
-            # args.devices = os.cpu_count()
-            # print(f'Uising {args.devices} CPU cores for training!')
 
     ndevs = args.nodes * args.devices
     args.strategy = 'ddp' if ndevs>1 else 'auto'
@@ -198,11 +181,6 @@ def main():
         args.patch_size = PATCH_SIZE[args.pmn]
         args.im_size = IMAGE_SIZE[args.pmn]
     args.prt_tag = args.pmn
-    # Setting all the random seeds to the same value.
-    # This is important in a distributed training setting. 
-    # Each rank will get its own set of initial weights. 
-    # If they don't match up, the gradients will not match either,
-    # leading to training that may not converge.
     pl.seed_everything(args.seed)
 
     ###### 2 - load data ######
@@ -255,11 +233,6 @@ def main():
                                     n_bands=n_channels,
                                     lbl_type='osm',
                                     transform=trans_ts)
-    elif args.dataset_name == 'vaihingen':
-        train_dataset = VaihingenDataset(datasets_settings_test['vaihingen']['data_path_ft'],
-                                         transform=trans_tr)
-        test_dataset = VaihingenDataset(datasets_settings_test['vaihingen']['data_path'],
-                                        transform=trans_ts)
     elif args.dataset_name == 'nyc':
         train_dataset = NYCDataset(datasets_settings_test['nyc']['data_path_ft'],
                                    n_bands=n_channels,
@@ -277,12 +250,7 @@ def main():
                                         transform=trans_tr)
         test_dataset = PotsdamDataset(datasets_settings_test[args.dataset_name]['data_path'],
                                       n_bands=n_channels,)
-    elif args.dataset_name == 'potsdam256':
-        train_dataset = PotsdamDataset(datasets_settings_test[args.dataset_name]['data_path_ft'],
-                                        n_bands=n_channels,
-                                        transform=trans_tr)
-        test_dataset = PotsdamDataset(datasets_settings_test[args.dataset_name]['data_path'],
-                                      n_bands=n_channels,)
+        
     # subset
     if args.dataset_proportion < 1:
         train_dataset = get_subset_datasets(train_dataset, args.dataset_proportion)

@@ -18,7 +18,6 @@ from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from sam2.get_args import get_args_train_baseline as get_args
 from sam2.sam2_image_trainer import SAM2ImageTrainer
 from sam2.sam2_image_w_auxDe_trainer import SAM2ImageTrainerAux
-from sam2.sam2_image_w_sepAuxDe4Weak_trainer import SAM2ImageTrainerSepAuxDe4Weak
 
 # dataset
 from dataset.get_combined_datasets import load_combined_datasets, get_datasets_train, MyDistributedBatchSampler
@@ -43,11 +42,6 @@ def main():
     else:
         ckpt_path = None
         wandb_resume = False
-    # Setting all the random seeds to the same value.
-    # This is important in a distributed training setting. 
-    # Each rank will get its own set of initial weights. 
-    # If they don't match up, the gradients will not match either,
-    # leading to training that may not converge.
     pl.seed_everything(args.seed)
     # setting logger
     os.environ["WANDB_MODE"] = args.wmode
@@ -75,11 +69,7 @@ def main():
     val_dataset = torch.utils.data.Subset(val_dataset, subset_inds)  # range(args.tbs))
     val_loader = DataLoader(val_dataset, batch_size=args.tbs, num_workers=args.num_workers,
                             pin_memory=True, shuffle=False, drop_last=True)
-    # # test
-    # test_dataset = OpenEarthMapDataset(datasets_settings_test['openearthmap']['data_path'],
-    #                                    transform=SegAugTransforms(trans_ts))
-    # test_loader = DataLoader(test_dataset, batch_size=args.tbs, num_workers=args.num_workers,
-    #                         pin_memory=True, shuffle=False, drop_last=True)
+
     # train
     if args.ntasks > 1:
         datasets_tr = get_datasets_train(args.dataset_name, transform=trans_tr, 
@@ -163,9 +153,6 @@ def main():
         trainer.fit(model, train_loader, ckpt_path=ckpt_path)
     else:
         trainer.fit(model, train_loader, val_loader, ckpt_path=ckpt_path)
-
-    # # test the model
-    # trainer.test(model, dataloaders=test_loader, verbose=True)
     
     t1 = datetime.datetime.now().replace(microsecond=0)
     print(f'Training is finished|Total spent time:{t1-t0}!')

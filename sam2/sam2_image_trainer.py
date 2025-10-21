@@ -87,7 +87,7 @@ class SAM2ImageTrainer(pl.LightningModule):
                                  f'++model.decoder_expand_dim={args.de_expand_dim}',
                                  f'++model.decoder_use_opt_two={args.opt_two}',
                                  f'++model.decoder_use_feature_norm={args.use_feature_norm}',
-                                 f'++model.clip_use_quick_gelu={args.clip_use_quick_gelu}',]
+                                 f'++model.clip_use_quick_gelu={not args.clip_use_gelu}',]
         if args.mute_adaptor: hydra_overrides_extra += ['++model.image_encoder.trunk.adaptor=None']
         if args.dofa_unfix_weights: 
             hydra_overrides_extra += ['++model.image_encoder.trunk.dofa_unfix_weights=True']
@@ -1046,7 +1046,8 @@ class SAM2ImageTrainer(pl.LightningModule):
         self.log(f'{name_key}-{prefix}{aux_tag}_mious_pred_noexist', iou_predictions[~y_exist].mean(), on_epoch=True, on_step=False, sync_dist=True, batch_size=x.shape[0])
         self.log(f'{name_key}-{prefix}{aux_tag}_exist_acc', exist_acc, on_epoch=True, on_step=False, sync_dist=True, batch_size=x.shape[0])
         if batch_idx==0 and self.trainer.global_rank==0:
-            for i in [0, 5, 9]:
+            log_indexes = [0, 5] if x.shape[0]>4 else [0]
+            for i in log_indexes:
                 self._log_imgs(name_key+'-'+prefix+aux_tag, x[i], masks[i], y[i])
     
 

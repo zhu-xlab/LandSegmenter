@@ -18,7 +18,6 @@ from dataset.datasets_settings import datasets_settings_test, class_names
 from dataset import DWOSMDataset, OpenEarthMapDataset, MultiSenGeDataset, VaihingenDataset, NYCDataset, LoveDADataset, PotsdamDataset
 from sam2.get_args import get_args_ov as get_args
 
-import json
 
 KEY_IMG = 'image'
 KEY_LBL = 'label'
@@ -61,7 +60,7 @@ def get_class_name_strings(dataset_name):
     cls_dict = class_names[dataset_name]
     name_list = [cls_dict[k][0] for k in cls_dict]
     return name_list
-    
+
 def calculate_acc_from_all(pred, gt, n_classes):
     ious = []
     for i in range(1,n_classes+1):
@@ -86,11 +85,8 @@ def main():
     assert len(args.test_batch_sizes) == len(args.test_dataset_names), 'The number of test batch sizes should be 1 or the same as the number of test datasets!'
     # for the separate auxiliary decoder setting
     if args.use_sep_aux_de_weak:
-        if 'noL' in args.ts_wpath or 'noS' in args.ts_wpath:
-            args.use_aux_decoder = 3
-        else:
-            args.use_aux_decoder = 8
-
+        args.use_aux_decoder = 8
+    
     for di, args.dataset_name in enumerate(args.test_dataset_names):
         t1 = datetime.datetime.now().replace(microsecond=0)
         patch_size = datasets_settings_test[args.dataset_name]['input_size']
@@ -102,7 +98,6 @@ def main():
             trans_ts = A.Compose([A.CenterCrop(width=patch_size, height=patch_size,)])
         else:
             trans_ts = None 
-        # trans_ts = None
 
         # test data
         if args.dataset_name == 'dw':
@@ -138,35 +133,18 @@ def main():
                                 pin_memory=True, shuffle=False, drop_last=False)
         args.n_batch = len(test_loader)
         args.n_ts = len(test_dataset)
-        # args.n_classes = len(class_names[args.dataset_name])
 
-        # saving path
-        args.pdir = args.ts_wpath.split('checkpoints')[0]
-        if args.test_use_multiple_prompts:
-            args.pdir = os.path.join(args.pdir, 'accuracy_mp')
-        else:
-            args.pdir = os.path.join(args.pdir, 'accuracy')
-        if not os.path.exists(args.pdir): 
+        ###### 3 - set saving path ###### 
+        if not os.path.exists(args.save_dir): 
             try:
-                os.makedirs(args.pdir)
+                os.makedirs(args.save_dir)
             except Exception as inner_e:
-                assert os.path.exists(args.pdir), f'Accuracy directory does not exist and cannot be created: {args.pdir}. Error: {inner_e}'
-        ep = args.ts_wpath.split("epoch=")[-1].split("-")[0]
-        # pred_fname = f'pred_OV_EP{ep}_{args.dataset_name}.npy'
-        # pred_fname = f'pred_OV_EP{ep}_{args.dataset_name}.h5'
-        # test_save_path = os.path.join(args.pdir, pred_fname)
+                assert os.path.exists(args.save_dir), f'Accuracy directory does not exist and cannot be created: {args.save_dir}. Error: {inner_e}'
+        ep = args.ts_wpath.split("epoch=")[-1].split(".")[0]
         pred_fname = f'pred_OV_{args.dataset_name}.xlsx'
-        test_save_path = os.path.join(args.pdir, pred_fname)
-        
-    # # load data
-    # test_dataset = PotsdamDataset('data/weakFT/test/potsdam_p512_val.lmdb',
-    #                             n_bands=datasets_settings_test[dataset_name]['n_channels'],)
-    # test_loader = DataLoader(test_dataset, batch_size=1, num_workers=8,
-    #                         pin_memory=True, shuffle=False, drop_last=False)
-    # n_batch = len(test_loader)
-    # n_ts = len(test_dataset)
-    # print(f'Total test data: {n_ts} | Number of batches: {n_batch}')
+        test_save_path = os.path.join(args.save_dir, pred_fname)
 
+        ###### 4 - predict ######
         model = ProxyCLIPSegmentation(clip_type=args.clip_type, 
                                       model_type=args.clip_visual_type, 
                                       vfm_model=args.vfm_model,
@@ -175,27 +153,14 @@ def main():
                                       #   slide_stride=112, slide_crop=336,
                                       args=args,
                                       )
-        print(f'clip_slide_stride:{args.clip_slide_stride}, clip_slide_crop:{args.clip_slide_crop}')
-
-        # predictions
+        
         t0 = datetime.datetime.now().replace(microsecond=0)
         preds, ys, preds_clip, preds_weak = [], [], [], []
-        # max_thr = 0.6
-        # show_imgs = []
-        for i, batch in enumerate(test_loader):
-            # if i==2:
+        for i, batch in tqdm(enumerate(test_loader), total=args.n_batch):
             x = batch[KEY_IMG].contiguous().to('cuda')
             y = batch[KEY_LBL].contiguous()
             clip_prob = model.predict(x, batch, return_prob=True)
             weak_prob = model.get_weak_model_prediction(batch, return_prob=True)
-            # # # # # # uneven combination
-            # seg_pred = (clip_prob+weak_prob)/2
-            # weak_prob_max = weak_prob.max(-1)[0].max(-1)[0][:,:,None,None]
-            # mask_clip = torch.ones_like(weak_prob_max)*2
-            # mask_weak = torch.ones_like(weak_prob_max)*2
-            # mask_clip[weak_prob_max<max_thr] = 3
-            # mask_weak[weak_prob_max<max_thr] = 1
-            ##
             weak_prob_max = weak_prob.max(-1)[0].max(-1)[0][:,:,None,None]
             clip_prob_max = clip_prob.max(-1)[0].max(-1)[0][:,:,None,None]
             mask_clip = torch.ones_like(weak_prob_max)*2
@@ -206,87 +171,57 @@ def main():
             select = (weak_prob_max>=args.max_thr)*(clip_prob_max<args.max_thr)
             mask_clip[select] = 1
             mask_weak[select] = 3
-            ##
             seg_pred = mask_clip*clip_prob+mask_weak*weak_prob
             seg_pred = seg_pred/seg_pred.sum(dim=1, keepdim=True)
             # # # # # # uneven combination
             seg_pred = seg_pred.argmax(1)
-            # seg_clip = clip_prob.argmax(1)
-            # seg_weak = weak_prob.argmax(1)
+            seg_clip = clip_prob.argmax(1)
+            seg_weak = weak_prob.argmax(1)
             preds.append(seg_pred.cpu().numpy())
-            # preds_clip.append(seg_clip.cpu().numpy())
-            # preds_weak.append(seg_weak.cpu().numpy())
+            preds_clip.append(seg_clip.cpu().numpy())
+            preds_weak.append(seg_weak.cpu().numpy())
             ys.append(y.numpy())
-            # if i==20: break
-            # if i==0:
-            # with h5py.File(test_save_path, 'w') as f:
-            #     f.create_dataset('clip_prob', data=clip_prob.cpu().numpy())
-            #     f.create_dataset('weak_prob', data=weak_prob.cpu().numpy())
-            # break
+            if i==5: break
         t1 = datetime.datetime.now().replace(microsecond=0)
 
-        # accuracy
+        ###### 5 - calculate accuracy ###### 
         try:
             ys = np.concatenate(ys, axis=0)
             ys = np.where(ys!=MASK_CODE, ys+1, 0)
             preds = np.concatenate(preds, axis=0)+1
-            # preds_clip = np.concatenate(preds_clip, axis=0)+1
-            # preds_weak = np.concatenate(preds_weak, axis=0)+1
+            preds_clip = np.concatenate(preds_clip, axis=0)+1
+            preds_weak = np.concatenate(preds_weak, axis=0)+1
             n_classes = np.max(ys)
             preds[ys==0] = 0
-            # preds_clip[ys==0] = 0
-            # preds_weak[ys==0] = 0
+            preds_clip[ys==0] = 0
+            preds_weak[ys==0] = 0
             accs = []
-            for p in [preds]:  # preds_clip, preds_weak, 
+            for p in [preds_clip, preds_weak, preds]:
                 ts_iou_all, ts_oa = calculate_acc_from_all(p, ys, n_classes)
                 accs_ = np.array(ts_iou_all+[ts_oa])
                 accs.append(accs_)
             accs = np.array(accs)
-            for acc, name in zip(accs, ['ovc']):   # 'clip', 'weak', 
+            for acc, name in zip(accs, ['pc(w.LandSeg)', 'LandSeg', 'fusion']):
                 acc_print = np.round(acc, 4)
-                print(f'{args.dataset_name} | {name} | {acc_print}')
-            # print(dataset_name, accs)
-            # np.save(test_save_path, accs)
-            # np.save('preds.npy', preds[:10])
-            # np.save('ys.npy', ys[:10])
-            for m, a in zip(['ovc'], accs):
+                print(f'{args.dataset_name} | {name:>15} | mIoU = {acc_print[-2]} | OA = {acc_print[-1]}')
+
+            # record results into xlsx
+            for m, a in zip(['pc(w.LandSeg)', 'LandSeg', 'fusion'], accs):
                 results = {'Dataset': args.dataset_name,
-                           'Epoch': ep,
-                           'Model': m,
-                           'mIoU': f'{a[-2]*100:.2f}',
-                           'OA': f'{a[-1]*100:.2f}',
-                           'IoUs': [f'{i*100:.2f}' for i in a[:-2]],
-                           'names': get_class_name_strings(args.dataset_name),
-                           }
+                        'Epoch': ep,
+                        'Model': m,
+                        'mIoU': f'{a[-2]*100:.2f}',
+                        'OA': f'{a[-1]*100:.2f}',
+                        'IoUs': [f'{i*100:.2f}' for i in a[:-2]],
+                        'names': get_class_name_strings(args.dataset_name),
+                        }
                 append_experiment_result(test_save_path, results)
+
         except Exception as e:
             raise NotImplementedError(e)
 
         t2 = datetime.datetime.now().replace(microsecond=0)
         print(f'Inference time: {t1-t0} | Acc calculating time: {t2-t1}')
-
-        # for sid in [0,10]:
-        #     plt.figure()
-        #     plt.subplot(1, 2, 1)
-        #     plt.imshow(preds[sid], cmap='tab10', vmin=0, vmax=6, interpolation='none')
-        #     plt.subplot(1, 2, 2)
-        #     plt.imshow(ys[sid], cmap='tab10', vmin=0, vmax=6, interpolation='none')
-        #     plt.savefig(os.path.join(args.pdir, f'Image_OVC_{args.weak_feat_type}_EP{ep}_{args.dataset_name}_{sid}_{args.clip_slide_stride}_{args.clip_slide_crop}.png'), bbox_inches='tight')
-        # for sid in [42, 60, 78, 80, 101, 106, 123, 124, 137, 140, 142, 145, 148, 150, 162, 169, 183, 191, 193]:
-        #     plt.figure()
-        #     plt.subplot(1, 4, 1)
-        #     plt.imshow(preds_clip[sid], cmap='tab10', vmin=0, vmax=n_classes, interpolation='none')
-        #     plt.axis('off')
-        #     plt.subplot(1, 4, 2)
-        #     plt.imshow(preds_weak[sid], cmap='tab10', vmin=0, vmax=n_classes, interpolation='none')
-        #     plt.axis('off')
-        #     plt.subplot(1, 4, 3)
-        #     plt.imshow(preds[sid], cmap='tab10', vmin=0, vmax=n_classes, interpolation='none')
-        #     plt.axis('off')
-        #     plt.subplot(1, 4, 4)
-        #     plt.imshow(ys[sid], cmap='tab10', vmin=0, vmax=n_classes, interpolation='none')
-        #     plt.axis('off')
-        #     plt.savefig(os.path.join(args.pdir, f'Image_OVC_{args.weak_feat_type}_EP{ep}_{args.dataset_name}_{sid}_{args.clip_slide_stride}_{args.clip_slide_crop}.png'), bbox_inches='tight')
 
 if __name__ == '__main__': 
     main()

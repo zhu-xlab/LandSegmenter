@@ -96,7 +96,7 @@ def get_args_ov():
 
 def get_common_args(parser):
     # saving directory
-    parser.add_argument('--save_dir', type=str, default='Results_test', help='Directory to save the results')  
+    parser.add_argument('--save_dir', type=str, default='Results', help='Directory to save the results')  
     # data settings
     parser.add_argument('--patch_size', type=int, default=256, help='Random cropped Patch size before resizing to 1024.')
     parser.add_argument('--batch_size', dest='bs', type=int, default=5, help='Batch size')
@@ -115,7 +115,7 @@ def get_common_args(parser):
     parser.add_argument('--use-cross-attention-two-way-trans', dest='opt_two', action='store_true', default=False, help='Whether to use noise mask embedding as an additional input in the two-way transformer (option 2) or not (option 1).')
     parser.add_argument('--use-feature-norm', action='store_true', default=False, help='Whether to use feature normalization or not when generating masks')
     parser.add_argument('--use-separate-prompt-fn', dest='sep_pfn', action='store_true', default=False, help='Whether to use separate prompt function for auxiliary decoder(s) or not')
-    parser.add_argument('--clip-use-quick-gelu', action='store_true', default=False, help='Whether to use QuickGELU in the CLIP text encoder or not')
+    parser.add_argument('--clip-use-gelu', action='store_true', default=False, help='Whether to use GELU (True) or QuickGELU (False) in the CLIP text encoder')
     # alignment to clip
     parser.add_argument('--align-to-clip', action='store_true', default=False, help='Whether using distillation losses to align the model to clip feature space or not')
     parser.add_argument('--clip-model-type', type=str, choices=['vanilla', 'MaskCLIP', 'GEM', 'SCLIP', 'ClearCLIP'], default='ClearCLIP', help='Type of clip model used for feature alignment.')
@@ -155,8 +155,8 @@ def get_common_args(parser):
     parser.add_argument('--use_mc_dropout', action='store_true', default=False, help='Whether to use dropout for training')
     parser.add_argument('--p_mc_dropout', type=float, default=0.5, help='Dropout rate for training')
     # wandb settings
-    parser.add_argument('--project_name', dest='pjn', type=str, default='NLPR_SSL4EO', help='Name of the wandb project to record statistics.')
-    parser.add_argument('--entity_name', dest='entity', type=str, default='vikki023', help='Name of the entity of wandb.')
+    parser.add_argument('--project_name', dest='pjn', type=str, default='landsegmenter', help='Name of the wandb project to record statistics.')
+    parser.add_argument('--entity_name', dest='entity', type=str, default='username', help='Name of the entity of wandb.')
     parser.add_argument('--wandb_mode', dest='wmode', type=str, default='online', choices=["online", "offline", "disabled"], help='Setting of wandb.init modes ("online", "offline" or "disabled")')
     # others
     parser.add_argument('--display_interval', dest='display_inv', type=int, default=1, help='Set the display interval during the training')
