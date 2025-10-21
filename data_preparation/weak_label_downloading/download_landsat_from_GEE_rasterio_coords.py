@@ -162,7 +162,7 @@ if __name__ == '__main__':
         # # # # # # settings # # # # # #
         if dataset == 'nlcd':
             # centroids csv
-            csv_path = '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_downloading/centroids_used/center_coords_usa.csv'
+            csv_path = 'data_preparation/weak_label_downloading/centroids_csv/center_coords_usa.csv'
             
             # date
             START_DATE = '2019'   # candidates: 2001, 2004, 2006, 2008, 2011, 2013, 2016, 2019
@@ -173,9 +173,8 @@ if __name__ == '__main__':
             
         elif dataset == 'usfs':
             # centroids csv
-            csv_path = '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_downloading/centroids_used/center_coords_usa.csv'
-            # '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_downloading/centroids_csv/center_coords_subset_usa_from_ssl4eo.csv'
-
+            csv_path = 'data_preparation/weak_label_downloading/centroids_csv/center_coords_usa.csv'
+            
             # date
             START_DATE = '2023'   # 1985-2023
             END_DATE   = START_DATE
@@ -185,7 +184,7 @@ if __name__ == '__main__':
         
         elif dataset == 'sbtn':
             # centroids csv
-            csv_path = '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_downloading/centroids_csv/center_coords_subset_sbtn_from_ssl4eo_l.csv'
+            csv_path = 'data_preparation/weak_label_downloading/centroids_csv/center_coords_subset_sbtn_from_ssl4eo_l.csv'
 
             # date
             START_DATE = '2020'   # 1985-2023

@@ -102,9 +102,9 @@ def worker(args):
 if __name__ == '__main__':
     dataset = 'worldcover_v200'
     n_process = 60
-    save_dir = f'/p/scratch/hai_ws4eo/liu_ch/data/WeakFT/{dataset}'
+    save_dir = f'data/WeakFT/{dataset}'
 
-    fp_csv = f'/p/scratch/hai_ws4eo/liu_ch/data/WeakFT/{dataset}/Downloaded_file_info_s2.csv'
+    fp_csv = f'data/WeakFT/{dataset}/Downloaded_file_info_s2.csv'
     df = pd.read_csv(fp_csv, header=0)
     print(f'Total {df.shape[0]} items to download!')
 

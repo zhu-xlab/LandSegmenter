@@ -171,7 +171,7 @@ if __name__ == '__main__':
     # layer = 'Land_Use' # 'impervious'
     # ee.Authenticate(auth_mode='notebook') 
     n_process = 20
-    save_dir_ = '/p/scratch/hai_dm4eo/liu_ch/data/WeakFT'
+    save_dir_ = 'data/WeakFT'
     
     for dataset in ['usfs']:
         if dataset == 'nlcd':

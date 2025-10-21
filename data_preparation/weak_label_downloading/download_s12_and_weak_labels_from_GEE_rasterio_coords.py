@@ -427,13 +427,13 @@ if __name__ == '__main__':
     n_process = 60
 
     for dataset in ['ghsl']:  
-        save_dir = f'/p/scratch/hai_dm4eo/liu_ch/data/WeakFT/{dataset}_s2c_only'
+        save_dir = f'data/WeakFT/{dataset}_s2c_only'
 
         # # # # # # settings # # # # # #
         if dataset == 'Iran':
             get_s2a = False
             get_iran_spots = False
-            csv_path = '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_downloading/centroids_csv/center_coords_ssl4eo_iran.csv'
+            csv_path = 'data_preparation/weak_label_downloading/centroids_csv/center_coords_ssl4eo_iran.csv'
             
             # date
             START_DATE = '2017'#-06-01'
@@ -441,8 +441,8 @@ if __name__ == '__main__':
 
             # read center points    
             if get_iran_spots:
-                ssl4eo_dots_csv = '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_preparation/weak_label_downloading/centroids_csv/center_coords_ssl4eo_save_order.csv'
-                iran_shp = '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_downloading/Iran_shp/irn_admbnda_adm0_unhcr_20190514.shp'
+                ssl4eo_dots_csv = 'data_preparation/weak_label_downloading/centroids_csv/center_coords_ssl4eo_save_order.csv'
+                iran_shp = 'data_preparation/weak_label_downloading/Iran_shp/irn_admbnda_adm0_unhcr_20190514.shp'
                 geo_data = get_overlap_points_iran(ssl4eo_dots_csv, iran_shp, csv_path)
             else:
                 geo_data = pd.read_csv(csv_path, header=0)
@@ -450,7 +450,7 @@ if __name__ == '__main__':
         elif dataset in ['worldcover_v100', 'worldcover_v200']:
             get_s2a = True
             # centroids csv
-            csv_path = '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_preparation/weak_label_downloading/centroids_csv/center_coords_subset_worldcover_from_ssl4eo.csv'
+            csv_path = 'data_preparation/weak_label_downloading/centroids_csv/center_coords_subset_worldcover_from_ssl4eo.csv'
             geo_data = pd.read_csv(csv_path, header=0)
 
             # date
@@ -460,7 +460,7 @@ if __name__ == '__main__':
         elif dataset == 'ghsl':
             get_s2a = False
             # centroids csv
-            csv_path = '/p/project1/hai_ws4eo/liu_ch/Weak_FT/segment-anything-2/data_preparation/weak_label_downloading/centroids_csv/center_coords_subset_ghsl_from_ssl4eo.csv'
+            csv_path = 'data_preparation/weak_label_downloading/centroids_csv/center_coords_subset_ghsl_from_ssl4eo.csv'
             geo_data = pd.read_csv(csv_path, header=0)
 
             # date

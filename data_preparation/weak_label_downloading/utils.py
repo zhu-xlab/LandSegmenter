@@ -85,26 +85,6 @@ def get_coords(features):
     return coords
 
 
-# def save_geotiff(img, coords, out_path):
-#     height, width, channels = img.shape
-#     xres = (coords[1][0] - coords[0][0]) / width
-#     yres = (coords[0][1] - coords[1][1]) / height
-#     transform = Affine.translation(coords[0][0] - xres / 2, coords[0][1] + yres / 2) * Affine.scale(xres, -yres)
-#     profile = {
-#         'driver': 'GTiff',
-#         'width': width,
-#         'height': height,
-#         'count': channels,
-#         'crs': '+proj=latlong',
-#         'transform': transform,
-#         'dtype': img.dtype,
-#         'compress': 'None'
-#     }
-    
-#     with rasterio.open(out_path,'w', **profile) as dst:
-#         for i in range(img.shape[2]):
-#             dst.write(img[:,:,i], i+1)
-#     return
 def save_geotiff(img, coords, out_path):
     height, width, channels = img.shape
     transform = from_bounds(coords[0][0], coords[1][1], coords[1][0], coords[0][1], width, height)
