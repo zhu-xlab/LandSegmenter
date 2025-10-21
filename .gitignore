@@ -7,12 +7,12 @@ __pycache__/
 build/*
 _C.*
 
-# .devcontainer
-# .github
-# .ipynb_checkpoints
-# .Trash-0
-# .dockerignore
-# .clang-format
+.devcontainer
+.github
+.ipynb_checkpoints
+.Trash-0
+.dockerignore
+.clang-format
 
 outputs/*
 checkpoints/*.pt

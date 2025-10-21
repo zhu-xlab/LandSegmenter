@@ -252,7 +252,7 @@ dependencies:
       - nvidia-nvtx-cu12==12.1.105
       - omegaconf==2.3.0
       - opencv-python-headless==4.10.0.84
-      - openpyxl=3.1.5
+      - openpyxl==3.1.5
       - parso==0.8.4
       - pexpect==4.9.0
       - platformdirs==4.2.2

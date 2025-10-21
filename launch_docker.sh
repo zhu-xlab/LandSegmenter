@@ -19,7 +19,7 @@ docker run -it -h weakft --name $container_name \
     --shm-size=4g \
     -d \
     -p $((7776+cid)):$((7776+cid)) \
-    -v /home/$USER/Codes/WeakFT:/home/$USER \
+    -v .:/home/$USER \
     -v /home/$USER/data:/data \
     -w /home/$USER \
     $img_name 

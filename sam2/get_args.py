@@ -32,46 +32,6 @@ def get_args_train_baseline():
     return args
 
 
-def get_args_1st_stage_test():
-    parser = argparse.ArgumentParser(description='Test 1st stage models')
-    # data settings
-    parser.add_argument('--dataset_name', type=str, default='dw', help='Name of the test dataset')
-    
-    # get common arguments
-    parser = get_common_args(parser)
-    
-    # initialize arguments
-    args = parser.parse_args()
-
-    # computing environment parameters
-    args = get_device_info(args)
-
-    return args
-
-
-def get_args_test_framework():
-    parser = argparse.ArgumentParser(description='Test Framework without saving')
-    # data settings
-    parser.add_argument('--test_dataset_names', nargs='*', type=str, default=['dw', 'osm', 'multisenge', 'loveda', 'nyc', 'potsdam'], help='Names of the datasets used for testing')
-    parser.add_argument('--test_batch_sizes', nargs='*', type=int, default=[30], help='Batch size for testing (len=1 or len(test_dataset_names))')
-
-    # model setting
-    parser.add_argument('--multiple_aux_decoder', type=int, default=1, help='Number of auxiliary decoders')
-    parser.add_argument('--test_max_threshold', type=float, default=-1)
-    parser.add_argument('--test_background_id', dest='test_bg_idx', type=int, default=0)
-    
-    # get common arguments
-    parser = get_common_args(parser)
-
-    # initialize arguments
-    args = parser.parse_args()
-
-    # computing environment parameters
-    args = get_device_info(args)
-
-    return args
-
-
 def get_args_fine_tune():
     parser = argparse.ArgumentParser(description='Fine-tuning')
     # data settings
