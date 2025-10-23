@@ -3,8 +3,8 @@
 # NOTE: home folder is always mounted inside the container
 
 cid=1
-img_name=$USER/weakft:v0.3.$cid
-container_name=$USER-weakft-$cid
+img_name=$USER/landseg:v1.0.$cid
+container_name=$USER-landseg-$cid
 docker stop $container_name
 docker rm $container_name
 
@@ -13,13 +13,13 @@ docker build \
     --build-arg="USERNAME=$USER" \
     -t $img_name .
 
-docker run -it -h weakft --name $container_name \
+docker run -it -h landseg --name $container_name \
     --gpus all \
     --memory=600g \
     --shm-size=4g \
     -d \
-    -p $((7776+cid)):$((7776+cid)) \
+    -p $((7777+cid)):$((7777+cid)) \
     -v .:/home/$USER \
-    -v /home/$USER/data:/data \
+    -v $1:/data \
     -w /home/$USER \
     $img_name 
