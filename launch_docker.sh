@@ -23,6 +23,3 @@ docker run -it -h weakft --name $container_name \
     -v /home/$USER/data:/data \
     -w /home/$USER \
     $img_name 
-
-# docker exec -it $container_name bash -c 'conda init && conda activate sam2 && pip install -e .'
-# after that, run the python script using 'docker exec -it $container_name bash test.sh'
