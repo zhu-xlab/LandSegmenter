@@ -54,10 +54,10 @@ Fig. 1. Architecture of LandSegmenter, where the attention-based fusion module (
 <br>
 
 ### 📦​ Model weights
-You can download the model weights from [HuggingFace](https://huggingface.co/vikki23/LandSegmenter)
+You can download the model weights from [HuggingFace](https://huggingface.co/vikki23/LandSegmenter).
 
 ### 📥 Installation
-First clone the repo:
+First, clone the repo:
 ```bash
     git clone https://github.com/zhu-xlab/LandSegmenter.git && cd LandSegmenter
 ```
@@ -77,7 +77,7 @@ We provide two installation options: with or without Docker.
 ```
 
 ### 🎰 Getting started
-Download the checkpoints
+Download the checkpoints:
 ```bash
     cd checkpoints
     sh download_ckpts.sh
@@ -119,12 +119,15 @@ We also provide a demo for playing around without data downloading (demo data ar
     CUDA_VISIBLE_DEVICES=0 python ProxyCLIP/demo.py --demo_dataset multisenge
     # demo_dataset can be set to: potsdam / loveda / nyc / dw / osm / multisenge
 ```
-Notice that the batch size would affect the final outputs of ProxyCLIP models and the fusion results, since ProxyCLIP applies the batch-wise adaptive normalization and masking approach to the similarity matrix. A larger batch size would perform more robust than `batch_size=1`. The results in our paper were generated with `batch_size=20`.
+Note that the batch size can affect the final outputs of ProxyCLIP models as well as the fusion results, since ProxyCLIP applies a batch-wise adaptive normalization and masking approach to the similarity matrix. Larger batch sizes generally yield more robust results compared to `batch_size=1`. All results reported in our paper were generated with `batch_size=20`.
+
 
 
 ### 👻​ LandSegmenter Training 
 ```bash
     sh train_landsegmenter.sh
+    # Set your $CUDA_ID for export CUDA_VISIBLE_DEVICES=$CUDA_ID
+    # $DATASET: potsdam / loveda / nyc / dw / osm / multisenge
 ```
 Notice that the script automatically detects and uses all the GPUs available. Please set your own CUDA_VISIBLE_DEVICES, or remove the CUDA_VISIBLE_DEVICES if you use slurm with `sbath`. 
 
@@ -150,20 +153,20 @@ Designed to bridge gaps between natural image processing and LULC mapping, LAS a
 - adaptation to medium-to-low-resolution RS imagery;
 - domain knowledge of land surface properties.
 
-As a result, LAS includes ∼150k globally distributed sample points (∼311k image patches and ∼200k label masks) across eight subsets (see Tab. 1):
-1) high-resolution RGB subset from OpenEarthMap (GSD: 0.25–0.5m, patch size: 320);
-2) RGB-NIR subset from DynamicEarthNet (GSD: 3–4m; patch size: 256);
-3) three Sentinel-2 (S2) subsets (GSD: 10m; 12–13 bands; patch size: 264);
-4) three Landsat-8/9 (L8/9) subsets (GSD: 30m; 7–11 bands; patch size: 264).
+As a result, LAS includes ∼150k globally distributed sample points (∼311k image patches and ∼200k label masks) across eight subsets:
+- high-resolution RGB subset from OpenEarthMap (GSD: 0.25–0.5m, patch size: 320);
+- RGB-NIR subset from DynamicEarthNet (GSD: 3–4m; patch size: 256);
+- three Sentinel-2 (S2) subsets (GSD: 10m; 12–13 bands; patch size: 264);
+- three Landsat-8/9 (L8/9) subsets (GSD: 30m; 7–11 bands; patch size: 264).
 
 ### ​📥​ Download
 #### Raw data:
-- Six weakly labeled subsets can be downloaded from [HuggingFace](https://huggingface.co/datasets/vikki23/LAS/tree/main/train_weak_raw)
-- Two accurately labeled subsets are publicly available: [OpenEarthMap](https://open-earth-map.org/) & [DynamicEarthNet](https://mediatum.ub.tum.de/1650201)
+- Six weakly labeled subsets can be downloaded from [HuggingFace](https://huggingface.co/datasets/vikki23/LAS/tree/main/train_weak_raw).
+- Two accurately labeled subsets are publicly available: [OpenEarthMap](https://open-earth-map.org/) & [DynamicEarthNet](https://mediatum.ub.tum.de/1650201).
 
 The scripts used for downloading the weakly labeled data can be found under `data_preparation`.
 #### LMDB:
-We also provide our processed data (in `lmdb` format) on HuggingFace: [weak](https://huggingface.co/datasets/vikki23/LAS/tree/main/train_weak_lmdb) & [Exact](https://huggingface.co/datasets/vikki23/LAS/tree/main/train_exact_lmdb).
+We also provide our processed data (in `lmdb` format) on HuggingFace: [weak](https://huggingface.co/datasets/vikki23/LAS/tree/main/train_weak_lmdb) & [exact](https://huggingface.co/datasets/vikki23/LAS/tree/main/train_exact_lmdb).
 
 # Test datasets
 We utilized 6 accurately labeled LULC datasets which are publicly available for evaluation:
