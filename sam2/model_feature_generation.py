@@ -96,8 +96,7 @@ class GenerateFeat():
     
     def predict_with_unique_prompts(self, batch):
         # get data
-        x, y, waves, y_exist, n_classes, prompt_tokens, _, _ = self._get_data(batch)
-        # bs = x.shape[0]
+        x, waves, n_classes, prompt_tokens, _, _ = self._get_data(batch)
 
         # prediction
         with torch.no_grad():
@@ -107,13 +106,12 @@ class GenerateFeat():
         if x.shape[-2:] != masks.shape[-2:]:
             masks = F.interpolate(masks, size=x.shape[-2:], mode='bilinear', align_corners=False)
         
-        return y, y_exist, masks, iou_predictions, precise_predictions, existance_predictions
+        return masks, iou_predictions, precise_predictions, existance_predictions
     
 
     def predict_with_multiple_prompts(self, batch, return_embeddings=True, imgs=None):
         # get data
-        x, y, waves, y_exist, n_prompt, class_id_list, prompt_tokens, dataset_name = self._get_data_with_multiple_prompts(batch)
-        num_cls = y_exist.shape[1]
+        x, waves, n_prompt, class_id_list, prompt_tokens, dataset_name = self._get_data_with_multiple_prompts(batch)
         if imgs is not None: x = imgs
 
         # prediction
@@ -126,15 +124,8 @@ class GenerateFeat():
             masks_list = [masks, masks_up]
         else:
             masks_list = [masks]
-        
-        # # get the largest logits among multiple prompts
-        # masks = (masks*LOGIT_SCALE).softmax(1)
-        # cls_index = F.one_hot(torch.tensor(class_id_list, device=self.device), num_cls)
-        # cls_index = cls_index.view(1, n_prompt, num_cls, 1, 1)
-        
-        # masks = (masks.unsqueeze(2) * cls_index).max(1)[0]
 
-        out_dict = {'y': y, 'y_exist': y_exist, 'masks_list': masks_list, 
+        out_dict = {'masks_list': masks_list, 
                     'iou_predictions': iou_predictions, 'precise_predictions': precise_predictions, 'existance_predictions': existance_predictions, 
                     'img_feats': img_feats, 'text_embeddings': text_embeddings}
 
@@ -211,13 +202,9 @@ class GenerateFeat():
 
     def _get_data(self, batch, return_single=True):
         x = batch[KEY_IMG].contiguous()
-        y = batch[KEY_LBL].contiguous()
         if self.use_GPU:
             x = x.to('cuda')
-            y = y.to('cuda')
 
-        if return_single:
-            assert len(y.shape)==3, f'Label shape is not correct: {y.shape} with return_single={return_single}'
         waves = batch[KEY_WAVE][0]
         if self.use_GPU: waves = waves.to('cuda')
         dataset_name = batch[KEY_DATASAT][0]
@@ -230,47 +217,31 @@ class GenerateFeat():
                 CLS_DICT = {i:random.choice(cls_all[i]) for i in cls_all}
             else:
                 CLS_DICT = {i:cls_all[i][0] for i in cls_all}
-            # existance GT
-            y_ = y if len(cls_name_keys)==1 else y[:,ki]
-            y_exist = torch.zeros((y_.shape[0], len(CLS_DICT)), device=y_.device)
-            for i in range(len(CLS_DICT)):
-                ye_ = (y_==i).sum(axis=(1,2))
-                y_exist[:,i] = (ye_>0).to(y_exist.dtype)
             
             # prepare prompt
-            prompt_tokens_, n_classes_ = self._prepare_prompt(CLS_DICT, y)
+            prompt_tokens_, n_classes_ = self._prepare_prompt(CLS_DICT, x)
             
             # append
-            ys.append(y_)
-            y_exists.append(y_exist)
             n_classes.append(n_classes_)
             prompt_tokens.append(prompt_tokens_)
         
         if return_single:
-            return x, ys[0], waves, y_exists[0], n_classes[0], prompt_tokens[0], if_weak_lbl, cls_name_keys[0]
+            return x, waves, n_classes[0], prompt_tokens[0], if_weak_lbl, cls_name_keys[0]
         else:
             return x, ys, waves, y_exists, n_classes, prompt_tokens, if_weak_lbl, cls_name_keys
 
 
     def _get_data_with_multiple_prompts(self, batch):
         x = batch[KEY_IMG].contiguous()
-        y = batch[KEY_LBL].contiguous()
         if self.use_GPU:
             x = x.to('cuda')
-            y = y.to('cuda')
         
         waves = batch[KEY_WAVE][0]
         if self.use_GPU: waves = waves.to('cuda')
         dataset_name = batch[KEY_DATASAT][0]
-        # if_weak_lbl = batch[KEY_WEAKLBL][0]
 
         # prepare prompts
-        if 'nlcd' in dataset_name: 
-            dataset_key = 'nlcd-lc'
-            y = y[:,0]
-        else:
-            dataset_key = dataset_name
-        cls_all = class_names[dataset_key]
+        cls_all = class_names[dataset_name]
         num_class = len(cls_all)
         CLS_DICT = {}
         class_id_list = []
@@ -281,16 +252,10 @@ class GenerateFeat():
                 CLS_DICT[idx] = cls_str
                 idx += 1
         
-        # existance GT
-        y_exist = torch.zeros((y.shape[0], num_class), device=y.device)
-        for i in range(num_class):
-            ye_ = (y==i).sum(axis=(1,2))
-            y_exist[:,i] = (ye_>0).to(y_exist.dtype)
-        
         # prepare prompt
-        prompt_tokens, n_prompt = self._prepare_prompt(CLS_DICT, y)
+        prompt_tokens, n_prompt = self._prepare_prompt(CLS_DICT, x)
         
-        return x, y, waves, y_exist, n_prompt, class_id_list, prompt_tokens, dataset_name
+        return x, waves, n_prompt, class_id_list, prompt_tokens, dataset_name
 
 
     def _get_image_embed(
@@ -350,7 +315,7 @@ class GenerateFeat():
         return features
     
 
-    def _prepare_prompt(self, class_name_dict, lbl):
+    def _prepare_prompt(self, class_name_dict, x):
         """ Tokenization of string inputs for the model. """
         truncate = False
         context_length = self.model.sam_prompt_encoder.context_length
@@ -367,7 +332,7 @@ class GenerateFeat():
         sot_token = self.tokenizer.encoder["<|startoftext|>"]
         eot_token = self.tokenizer.encoder["<|endoftext|>"]
         all_tokens = [[sot_token] + self.tokenizer.encode(text) + [eot_token] for text in texts]
-        result = torch.zeros(len(all_tokens), context_length, dtype=torch.long, device=lbl.device)
+        result = torch.zeros(len(all_tokens), context_length, dtype=torch.long, device=x.device)
 
         for i, tokens in enumerate(all_tokens):
             if len(tokens) > context_length:
@@ -376,7 +341,7 @@ class GenerateFeat():
                     tokens[-1] = eot_token
                 else:
                     raise RuntimeError(f"Input {texts[i]} is too long for context length {context_length}")
-            result[i, :len(tokens)] = torch.tensor(tokens, device=lbl.device)
+            result[i, :len(tokens)] = torch.tensor(tokens, device=x.device)
 
         return result, n_prompt
     
