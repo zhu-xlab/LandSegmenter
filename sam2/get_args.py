@@ -57,7 +57,7 @@ def get_args_fine_tune():
     return args
 
 
-def get_args_ov():
+def get_args_ov(defaults=None):
     parser = argparse.ArgumentParser(description='Test Framework for OV')
     # data settings
     parser.add_argument('--test_dataset_names', nargs='*', type=str, default=['dw', 'osm', 'multisenge', 'loveda', 'nyc', 'potsdam'], help='Names of the datasets used for testing')
@@ -87,6 +87,11 @@ def get_args_ov():
 
     # initialize arguments
     args = parser.parse_args()
+
+    # change default values
+    if defaults:
+        for k, v in defaults.items():
+            setattr(args, k, v)
 
     # computing environment parameters
     args = get_device_info(args)
