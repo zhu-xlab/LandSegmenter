@@ -155,7 +155,6 @@ def main():
                                   )
     
     ###### 4 - make predictions ######
-    # with autocast(device_type='cuda', dtype=torch.float16): 
     clip_prob = model.predict(x, batch, return_prob=True)
     weak_prob = model.get_weak_model_prediction(batch, return_prob=True)
     weak_prob_max = weak_prob.max(-1)[0].max(-1)[0][:,:,None,None]
