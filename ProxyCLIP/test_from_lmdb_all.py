@@ -15,7 +15,7 @@ from proxyclip_segmentor import ProxyCLIPSegmentation
 
 import albumentations as A
 from dataset.datasets_settings import datasets_settings_test, class_names
-from dataset import DWOSMDataset, OpenEarthMapDataset, MultiSenGeDataset, VaihingenDataset, NYCDataset, LoveDADataset, PotsdamDataset
+from dataset import DWOSMDataset, MultiSenGeDataset, NYCDataset, LoveDADataset, PotsdamDataset
 from sam2.get_args import get_args_ov as get_args
 
 
@@ -83,9 +83,6 @@ def main():
     if len(args.test_batch_sizes) == 1:
         args.test_batch_sizes = args.test_batch_sizes * len(args.test_dataset_names)
     assert len(args.test_batch_sizes) == len(args.test_dataset_names), 'The number of test batch sizes should be 1 or the same as the number of test datasets!'
-    # for the separate auxiliary decoder setting
-    if args.use_sep_aux_de_weak:
-        args.use_aux_decoder = 8
     
     for di, args.dataset_name in enumerate(args.test_dataset_names):
         t1 = datetime.datetime.now().replace(microsecond=0)
@@ -105,9 +102,6 @@ def main():
                                         mode=datasets_settings_test['dw']['mode'],
                                         n_bands=datasets_settings_test['dw']['n_channels'],
                                         transform=trans_ts)
-        elif args.dataset_name == 'openearthmap':
-            test_dataset = OpenEarthMapDataset(datasets_settings_test['openearthmap']['data_path'],
-                                            transform=trans_ts)
         elif args.dataset_name == 'multisenge':
             test_dataset = MultiSenGeDataset(datasets_settings_test['multisenge']['data_path'],
                                             transform=trans_ts)
@@ -116,9 +110,6 @@ def main():
                                         mode=datasets_settings_test['osm']['mode'],
                                         n_bands=datasets_settings_test['osm']['n_channels'],
                                         lbl_type='osm')
-        elif args.dataset_name == 'vaihingen':
-            test_dataset = VaihingenDataset(datasets_settings_test['vaihingen']['data_path'],
-                                            transform=trans_ts)
         elif args.dataset_name == 'nyc':
             test_dataset = NYCDataset(datasets_settings_test['nyc']['data_path'],
                                     n_bands=datasets_settings_test['nyc']['n_channels'],
@@ -150,7 +141,6 @@ def main():
                                       vfm_model=args.vfm_model,
                                       name_path=f'ProxyCLIP/configs/cls_{args.dataset_name}.txt',
                                       slide_stride=args.clip_slide_stride, slide_crop=args.clip_slide_crop,
-                                      #   slide_stride=112, slide_crop=336,
                                       args=args,
                                       )
         
@@ -181,7 +171,6 @@ def main():
             preds_clip.append(seg_clip.cpu().numpy())
             preds_weak.append(seg_weak.cpu().numpy())
             ys.append(y.numpy())
-            if i==5: break
         t1 = datetime.datetime.now().replace(microsecond=0)
 
         ###### 5 - calculate accuracy ###### 

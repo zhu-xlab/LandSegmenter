@@ -11,7 +11,6 @@ from dataset.lmdb_dataset_ghsl import GHSLDataset
 
 from dataset.lmdb_dataset_nyc import NYCDataset
 from dataset.lmdb_dataset_loveda import LoveDADataset
-from dataset.lmdb_dataset_vaihingen import VaihingenDataset
 from dataset.lmdb_dataset_potsdam import PotsdamDataset
 
 __all__ = ['SegAugTransforms', 

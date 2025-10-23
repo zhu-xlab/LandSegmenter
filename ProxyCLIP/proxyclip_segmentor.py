@@ -382,18 +382,6 @@ class ProxyCLIPSegmentation():
         # logits = logits * self.logit_scale
         logits = logits.softmax(1)  # n_queries * w * h
 
-        # # best
-        # logits = (logits).softmax(1)
-        # if num_cls != num_queries:
-        #     logits = logits.unsqueeze(2)
-        #     cls_index = nn.functional.one_hot(self.class_id_list, num_cls)
-        #     cls_index = cls_index.view(1, num_queries, num_cls, 1, 1)
-        #     print(cls_index.dtype, logits.dtype)
-        #     print(cls_index)
-        #     print(self.class_id_list)
-        #     logits = (logits * cls_index).max(1)[0]
-        # logits = logits/logits.sum(1,keepdim=True)
-
         seg_pred = logits.argmax(1) 
         seg_pred[logits.max(1)[0]< self.prob_thd] = 0   
         # print(f'prob_thd={self.prob_thd}')     
