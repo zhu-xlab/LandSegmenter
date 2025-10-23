@@ -187,7 +187,7 @@ This repository builds upon [SAM2](https://github.com/facebookresearch/sam2), [S
 
 # Citation
 ```BibTeX
-@ARTICLE{liu-cromss,
+@ARTICLE{liu-landseg,
   author={Liu, Chenying and Huang, Wei and Zhu, Xiao Xiang},
   journal={}, 
   title={LandSegmenter: Towards a Flexible Foundation Model for Land Use and Land Cover Mapping}, 
