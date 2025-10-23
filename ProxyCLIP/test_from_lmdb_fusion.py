@@ -182,12 +182,12 @@ def main():
                 accs_ = np.array(ts_iou_all+[ts_oa])
                 accs.append(accs_)
             accs = np.array(accs)
-            for acc, name in zip(accs, ['ovc']):
+            for acc, name in zip(accs, ['Fusion']):
                 acc_print = np.round(acc, 4)
                 print(f'{args.dataset_name} | {name:>15} | mIoU = {acc_print[-2]} | OA = {acc_print[-1]}')
 
             # record results into xlsx
-            for m, a in zip(['ovc'], accs):
+            for m, a in zip(['Fusion'], accs):
                 results = {'Dataset': args.dataset_name,
                            'Epoch': ep,
                            'Model': m,
