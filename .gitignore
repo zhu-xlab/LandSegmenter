@@ -45,3 +45,4 @@ check_text_embeddings
 cmaps
 
 show_train_sample_*
+demo_data/predict
