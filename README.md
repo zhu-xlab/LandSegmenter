@@ -3,8 +3,7 @@
 <h1>LandSegmenter: Towards a Flexible Foundation Model for Land Use and Land Cover Mapping</h1>
 
 <div>
-    <strong>This repository contains the official implementation of the paper "LandSegmenter: Towards a Flexible Foundation Model for Land Use and Land Cover Mapping".
-    <!-- "[Towards a Unified Copernicus Foundation Model for Earth Vision](https://arxiv.org/abs/)"</strong> -->
+    <strong>This repository contains the official implementation of the paper "LandSegmenter: Towards a Flexible Foundation Model for Land Use and Land Cover Mapping".</strong>
 </div>
 
 <div>
@@ -36,13 +35,16 @@ stage challenges at the input, model, and output levels.
 
 </div>
 
+
 # Key features
+
 - 👽​​ **LandSegmenter**: A task-specific Foundation Model (FM) for Land Use and Land Cover (LULC) mapping, characterized by high flexibility in both inputs (multi-band, multi-resolution imagery) and outputs (customizable category definitions), supporting both zero-shot inference and fine-tuning.
 - 🕹️​ **Confidence-guided Fusion**: A class-wise confidence-guided fusion strategy that boosts LandSegmenter’s zero-shot inference through dynamic integration of CLIP's knowledge to reduce semantic omissions.
 - 🗺️​ **LAS**: A large-scale weakly supervised dataset for LandSegmenter training, with ~150K globally sampled points from diverse satellite sensors and LULC products, spanning from high-resolution RGB to low-resolution multispectral imagery.
 
 
 # LandSegmenter
+
 LandSegmenter is the first LULC FM trained with LAS, designed with high flexibility to handle diverse input modalities and customizable category settings. It builds on [SAM2](https://github.com/facebookresearch/sam2)'s backbone for robust multi-scale spatial representation, further enhanced by multispectral features from [DOFA](https://github.com/zhu-xlab/DOFA) and high-frequency components for refined structural details. A text-based prompter derived from [GeoRSCLIP](https://github.com/om-ai-lab/RS5M), which takes class names as inputs, further strengthens its semantic understanding, enabling concept-aware and adaptable segmentation across heterogeneous data sources.
 
 <div align="center">
@@ -57,7 +59,7 @@ You can download the model weights from [HuggingFace](https://huggingface.co/vik
 ### 📥 Installation
 First clone the repo:
 ```bash
-    git clone https://github.com/zhu-xlab/LandSegmenter && cd LandSegmenter
+    git clone https://github.com/zhu-xlab/LandSegmenter.git && cd LandSegmenter
 ```
 We provide two installation options: with or without Docker.
 - With docker (recommended):
