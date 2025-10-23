@@ -20,6 +20,6 @@ wget https://huggingface.co/earthflow/DOFA/resolve/main/DOFA_ViT_base_e100.pth
 wget https://huggingface.co/Zilun/GeoRSCLIP/resolve/main/ckpt/RS5M_ViT-B-32.pt
 
 # download LandSegmenter checkpoint
-wget https://huggingface.co/vikki23/LandSegmenter/resolve/main/LandSegmenter-epoch%3D49.ckpt
+wget https://huggingface.co/vikki23/LandSegmenter/resolve/main/LandSegmenter-aux-epoch%3D49.ckpt
 
 echo "All checkpoints are downloaded successfully."
