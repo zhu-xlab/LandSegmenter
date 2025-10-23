@@ -6,16 +6,11 @@ from torch.utils.data import Dataset
 # from albumentations.pytorch import ToTensorV2
 from dataset.data_properties_sentinel import SegAugTransforms
 
-# from NYC dataset
+# NYC statistics
 MEANS = [111.34724539, 130.45546838, 130.80935808, 156.86974368]
 STDS = [46.64435224, 36.81250866, 32.99007486, 41.4493565 ]
 
-# # combined with imagenet stats
-# MEANS = [123.675, 116.28, 103.53, 131.669] # RGB-NIR 
-# STDS = [58.395, 57.12, 57.375, 50.583]
-#   
 WAVES = np.array([0.665, 0.56, 0.49, 0.83])  # RGB-NIR
-# from gpt: 0.670, 0.560, 0.475, 0.850
 
 KEY_IMG = 'image'
 KEY_LBL = 'label'

@@ -52,7 +52,7 @@ class LoveDADataset(Dataset):
             key = str(index)
             data = txn.get(key.encode())
             data_bytes, data_shape, lbl_bytes, lbl_shape, a = pickle.loads(data)
-            img = np.frombuffer(data_bytes, dtype=np.uint8).reshape(data_shape).astype(np.float32) 
+            img = np.frombuffer(data_bytes, dtype=np.uint8).reshape(data_shape).astype(np.float32)[[2,1,0]]
             lbl = np.frombuffer(lbl_bytes, dtype=np.uint8).reshape(lbl_shape).copy()
             lbl.setflags(write=True)
             
