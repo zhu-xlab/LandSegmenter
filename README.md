@@ -20,8 +20,7 @@
     <h4 align="center">
     <!-- • <a href="" target='_blank'>[TGRS]</a>  -->
     <!-- • <a href="https://ieeexplore.ieee.org/document/10930953" target='_blank'> [ISPRS] </a> -->
-    • [arXiv]
-    <!-- • <a href="https://arxiv.org/abs/2405.01217" target='_blank'>[arXiv]</a> -->
+    • <a href="https://arxiv.org/abs/2511.08156" target='_blank'>[arXiv]</a>
     • <a href="https://github.com/zhu-xlab/LandSegmenter" target='_blank'>[Project]</a>
     </h4>
 </div>
@@ -189,12 +188,13 @@ This repository builds upon [SAM2](https://github.com/facebookresearch/sam2), [S
 
 # Citation
 ```BibTeX
-@ARTICLE{liu-landseg,
-  author={Liu, Chenying and Huang, Wei and Zhu, Xiao Xiang},
-  journal={}, 
-  title={LandSegmenter: Towards a Flexible Foundation Model for Land Use and Land Cover Mapping}, 
-  year={2025},
-  volume={},
-  number={},
-  pages={in press}}
+@misc{liu2025landsegmenter,
+      title={LandSegmenter: Towards a Flexible Foundation Model for Land Use and Land Cover Mapping}, 
+      author={Chenying Liu and Wei Huang and Xiao Xiang Zhu},
+      year={2025},
+      eprint={2511.08156},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2511.08156}, 
+}
 ```
