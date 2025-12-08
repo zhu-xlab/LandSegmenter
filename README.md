@@ -29,8 +29,7 @@
 
 <div align="center">
 <img src="assets/Framework_Overview.png" width="100%"/>
-We propose LandSegmenter, an LULC FM framework that resolves three-
-stage challenges at the input, model, and output levels.
+We propose LandSegmenter, an LULC FM framework that resolves three-stage challenges at the input, model, and output levels.
 
 </div>
 
