@@ -3,7 +3,7 @@
 <h1>LandSegmenter: Towards a Flexible Foundation Model for Land Use and Land Cover Mapping</h1>
 
 <div>
-    <strong>This repository contains the official implementation of the paper "LandSegmenter: Towards a Flexible Foundation Model for Land Use and Land Cover Mapping".</strong>
+    <strong>This repository contains the official implementation of the paper "LandSegmenter: Towards a Flexible Foundation Model for Land Use and Land Cover Mapping", accepted by ISPRS Journal of Photogrammetry and Remote Sensing.</strong>
 </div>
 
 <div>
@@ -20,6 +20,7 @@
     <h4 align="center">
     <!-- • <a href="" target='_blank'>[TGRS]</a>  -->
     <!-- • <a href="https://ieeexplore.ieee.org/document/10930953" target='_blank'> [ISPRS] </a> -->
+    • <a href="https://www.sciencedirect.com/science/article/pii/S0924271626002406" target='_blank'>[ISPRS]</a>
     • <a href="https://arxiv.org/abs/2511.08156" target='_blank'>[arXiv]</a>
     • <a href="https://github.com/zhu-xlab/LandSegmenter" target='_blank'>[Project]</a>
     </h4>
@@ -187,13 +188,15 @@ This repository builds upon [SAM2](https://github.com/facebookresearch/sam2), [S
 
 # Citation
 ```BibTeX
-@misc{liu2025landsegmenter,
-      title={LandSegmenter: Towards a Flexible Foundation Model for Land Use and Land Cover Mapping}, 
-      author={Chenying Liu and Wei Huang and Xiao Xiang Zhu},
-      year={2025},
-      eprint={2511.08156},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2511.08156}, 
+@article{liu2026landsegmenter,
+    title = {LandSegmenter: Towards a flexible foundation model for Land Use and Land Cover mapping},
+    journal = {ISPRS Journal of Photogrammetry and Remote Sensing},
+    volume = {238},
+    pages = {409-421},
+    year = {2026},
+    issn = {0924-2716},
+    doi = {https://doi.org/10.1016/j.isprsjprs.2026.04.056},
+    url = {https://www.sciencedirect.com/science/article/pii/S0924271626002406},
+    author = {Chenying Liu and Wei Huang and Xiao Xiang Zhu},
 }
 ```
