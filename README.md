@@ -113,7 +113,7 @@ Test on the full set and calculate accuracy:
     # Set your $CUDA_ID for export CUDA_VISIBLE_DEVICES=$CUDA_ID
     # $DATASET: potsdam / loveda / nyc / dw / osm / multisenge
 ```
-To test single mothed, replace `ProxyCLIP/test_from_lmdb_all.py` with `ProxyCLIP/test_from_lmdb_landsegmenter.py`, `ProxyCLIP/test_from_lmdb_pc.py`, `ProxyCLIP/test_from_lmdb_fusion.py` for only testing LandSegmenter, ProxyCLIP, Fusion, respective.
+To test single method, replace `ProxyCLIP/test_from_lmdb_all.py` with `ProxyCLIP/test_from_lmdb_landsegmenter.py`, `ProxyCLIP/test_from_lmdb_pc.py`, `ProxyCLIP/test_from_lmdb_fusion.py` for only testing LandSegmenter, ProxyCLIP, Fusion, respective.
 
 We also provide a demo for playing around without data downloading (demo data are at `demo_data/image`):
 ```bash
